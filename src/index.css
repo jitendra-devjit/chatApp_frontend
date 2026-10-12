@@ -1,7 +1,4 @@
-@import "@fontsource-variable/geist/wght.css";
-@import "@fontsource-variable/geist-mono/wght.css";
-@import "@fontsource/instrument-serif/400.css";
-@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource-variable/plus-jakarta-sans/wght.css";
 
 @import "tailwindcss";
 
@@ -9,49 +6,63 @@
 
 :root {
   color-scheme: dark;
-  --canvas: #0c0c0d;
-  --surface: #121214;
-  --raised: #1b1b1e;
-  --hover: #222226;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.14);
-  --ink: #ededea;
-  --muted: #9a9a9e;
-  --faint: #636368;
-  --accent: #c8f542;
-  --accent-ink: #11140a;
-  --accent-text: #c8f542;
-  --danger: #ff6b5e;
-  --overlay: rgba(0, 0, 0, 0.72);
-  --grain-opacity: 0.05;
+
+  /* the three stops of the accent gradient, swapped by data-accent */
+  --a1: #7c5cff;
+  --a2: #b85cff;
+  --a3: #ff5ca8;
+
+  --canvas: #06060c;
+  --panel: rgba(20, 20, 32, 0.6);
+  --panel-solid: #13131e;
+  --raised: rgba(255, 255, 255, 0.055);
+  --hover: rgba(255, 255, 255, 0.09);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #f5f5fb;
+  --muted: #a6a6bd;
+  --faint: #6f6f88;
+  --bubble: rgba(255, 255, 255, 0.075);
+  --danger: #ff6b6b;
+  --online: #34d399;
+  --overlay: rgba(4, 4, 10, 0.74);
+  --accent-text: color-mix(in oklab, var(--a1) 62%, white);
+  --aurora-opacity: 0.5;
+  --panel-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --canvas: #f3f2ee;
-  --surface: #faf9f6;
-  --raised: #ffffff;
-  --hover: #ecebe6;
-  --line: rgba(20, 20, 18, 0.09);
-  --line-strong: rgba(20, 20, 18, 0.2);
-  --ink: #161615;
-  --muted: #64645f;
-  --faint: #96968f;
-  --accent: #c8f542;
-  --accent-ink: #11140a;
-  --accent-text: #4a6600;
-  --danger: #c8321f;
-  --overlay: rgba(20, 20, 18, 0.55);
-  --grain-opacity: 0.035;
+  --canvas: #eceef8;
+  --panel: rgba(255, 255, 255, 0.7);
+  --panel-solid: #ffffff;
+  --raised: rgba(20, 20, 60, 0.045);
+  --hover: rgba(20, 20, 60, 0.08);
+  --line: rgba(20, 20, 60, 0.08);
+  --line-strong: rgba(20, 20, 60, 0.17);
+  --ink: #11111c;
+  --muted: #58586f;
+  --faint: #8f8fa6;
+  --bubble: rgba(255, 255, 255, 0.95);
+  --danger: #e03131;
+  --online: #10b981;
+  --overlay: rgba(24, 24, 48, 0.45);
+  --accent-text: color-mix(in oklab, var(--a1) 82%, black);
+  --aurora-opacity: 0.42;
+  --panel-shadow: 0 30px 80px -36px rgba(50, 50, 110, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+:root[data-accent="ocean"] { --a1: #2f7bff; --a2: #1fb0ff; --a3: #1fe0c8; }
+:root[data-accent="sunset"] { --a1: #ff7a3d; --a2: #ff4d6d; --a3: #d946ef; }
+:root[data-accent="mint"] { --a1: #0fb981; --a2: #12c8b4; --a3: #38bdf8; }
+:root[data-accent="rose"] { --a1: #ff4d7d; --a2: #ff6f91; --a3: #ffb057; }
+
 @theme inline {
-  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
   --color-canvas: var(--canvas);
-  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-solid: var(--panel-solid);
   --color-raised: var(--raised);
   --color-hover: var(--hover);
   --color-line: var(--line);
@@ -59,28 +70,44 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
+  --color-bubble: var(--bubble);
+  --color-accent: var(--a1);
   --color-accent-text: var(--accent-text);
   --color-danger: var(--danger);
+  --color-online: var(--online);
   --color-overlay: var(--overlay);
 
-  --animate-message-in: message-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-fade-in: fade-in 0.18s ease-out;
-  --animate-pop-in: pop-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-drift-a: drift-a 22s ease-in-out infinite alternate;
+  --animate-drift-b: drift-b 28s ease-in-out infinite alternate;
+  --animate-drift-c: drift-c 34s ease-in-out infinite alternate;
+  --animate-typing: typing-bounce 1.2s ease-in-out infinite;
+  --animate-shine: shine 2.8s ease-in-out infinite;
+  --animate-ping-soft: ping-soft 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-@keyframes message-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes drift-a {
+  from { transform: translate3d(-8%, -6%, 0) scale(1); }
+  to { transform: translate3d(14%, 10%, 0) scale(1.18); }
 }
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes drift-b {
+  from { transform: translate3d(10%, 8%, 0) scale(1.1); }
+  to { transform: translate3d(-14%, -8%, 0) scale(0.92); }
 }
-@keyframes pop-in {
-  from { opacity: 0; transform: translateY(6px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes drift-c {
+  from { transform: translate3d(0, 10%, 0) scale(0.95); }
+  to { transform: translate3d(-10%, -12%, 0) scale(1.15); }
+}
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@keyframes shine {
+  0%, 55% { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(320%) skewX(-18deg); }
+}
+@keyframes ping-soft {
+  0% { transform: scale(1); opacity: 0.7; }
+  80%, 100% { transform: scale(2.1); opacity: 0; }
 }
 
 /* ---------- base ---------- */
@@ -97,27 +124,16 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.45;
-  letter-spacing: -0.006em;
+  letter-spacing: -0.008em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }
 
-/* film grain over the whole app, keeps flat colours from looking sterile */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  pointer-events: none;
-  opacity: var(--grain-opacity);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
 ::selection {
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: color-mix(in oklab, var(--a1) 55%, transparent);
+  color: #fff;
 }
 
 button,
@@ -136,6 +152,12 @@ button:disabled {
 input:focus-visible,
 textarea:focus-visible {
   outline: none;
+}
+
+/* Edge adds its own "show password" eye, the form already has one */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
 }
 
 /* thin scrollbars that only show their thumb */
@@ -159,18 +181,40 @@ textarea:focus-visible {
 
 /* ---------- pieces used in several places ---------- */
 
-@utility label-mono {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+/* frosted panel that lets the aurora glow through */
+@utility glass {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
 }
 
-/* faint dot grid behind the conversation */
-@utility dot-grid {
-  background-image: radial-gradient(var(--line) 1px, transparent 1px);
-  background-size: 22px 22px;
+/* the accent gradient as a fill */
+@utility grad {
+  background-image: linear-gradient(135deg, var(--a1), var(--a2) 55%, var(--a3));
+}
+
+/* the accent gradient, very faint, for selected and highlighted surfaces */
+@utility grad-soft {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--a1) 24%, transparent),
+    color-mix(in oklab, var(--a3) 10%, transparent)
+  );
+}
+
+/* the accent gradient as text colour */
+@utility grad-text {
+  background-image: linear-gradient(120deg, var(--a1), var(--a2) 50%, var(--a3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* soft coloured glow under accent buttons */
+@utility glow {
+  box-shadow: 0 10px 30px -10px color-mix(in oklab, var(--a2) 75%, transparent);
 }
 
 /* placeholder block while data loads */
@@ -181,30 +225,29 @@ textarea:focus-visible {
 
 /* emoji picker dressed in the app's own colours */
 aside.EmojiPickerReact.epr-main {
-  --epr-bg-color: var(--raised);
-  --epr-category-label-bg-color: var(--raised);
+  --epr-bg-color: var(--panel-solid);
+  --epr-category-label-bg-color: var(--panel-solid);
   --epr-text-color: var(--ink);
-  --epr-search-input-bg-color: var(--canvas);
-  --epr-search-input-bg-color-active: var(--canvas);
+  --epr-search-input-bg-color: var(--raised);
+  --epr-search-input-bg-color-active: var(--raised);
   --epr-search-input-text-color: var(--ink);
   --epr-search-input-placeholder-color: var(--faint);
   --epr-search-border-color: var(--line-strong);
-  --epr-search-border-color-active: var(--line-strong);
+  --epr-search-border-color-active: var(--accent-text);
   --epr-hover-bg-color: var(--hover);
   --epr-focus-bg-color: var(--hover);
   --epr-highlight-color: var(--accent-text);
   --epr-category-icon-active-color: var(--accent-text);
   --epr-picker-border-color: transparent;
   --epr-picker-border-radius: 0;
-  --epr-search-input-border-radius: 12px;
+  --epr-search-input-border-radius: 14px;
   --epr-category-label-height: 34px;
   font-family: var(--font-sans);
 }
 aside.EmojiPickerReact .epr-emoji-category-label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.09em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--faint);
 }

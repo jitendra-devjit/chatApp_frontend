@@ -1,4 +1,6 @@
 import React,{ useCallback, useContext, useState } from 'react'
+import { AnimatePresence } from 'motion/react'
+import NavRail from '../components/NavRail'
 import Sidebar from '../components/Sidebar'
 import ChatContainer from '../components/ChatContainer'
 import RightSidebar from '../components/RightSidebar'
@@ -13,23 +15,28 @@ const HomePage = () => {
 
     // the details column starts open only where there is room for it
     const [isDetailsOpen, setIsDetailsOpen] = useState(isWideScreen);
-    const [lightboxImage, setLightboxImage] = useState(null);
+    const [lightbox, setLightbox] = useState(null); // { src, user, title } of the picture being viewed
 
     const closeDetails = useCallback(() => setIsDetailsOpen(false), []);
-    const closeLightbox = useCallback(() => setLightboxImage(null), []);
+    const closeLightbox = useCallback(() => setLightbox(null), []);
 
     const showDetails = Boolean(selectedUser) && isDetailsOpen;
 
     return (
-    <main className={`h-dvh grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)] ${showDetails ? 'xl:grid-cols-[340px_minmax(0,1fr)_320px]' : ''}`}>
+    <main className='h-dvh flex md:gap-3 md:p-3'>
+        <NavRail />
         <Sidebar />
         <ChatContainer
           isDetailsOpen={showDetails}
           onToggleDetails={() => setIsDetailsOpen((open) => !open)}
-          onOpenImage={setLightboxImage}
+          onOpenImage={setLightbox}
         />
-        {showDetails && <RightSidebar onClose={closeDetails} onOpenImage={setLightboxImage} />}
-        {lightboxImage && <ImageLightbox src={lightboxImage} onClose={closeLightbox} />}
+        <AnimatePresence>
+          {showDetails && <RightSidebar key='details' onClose={closeDetails} onOpenImage={setLightbox} />}
+        </AnimatePresence>
+        <AnimatePresence>
+          {lightbox && <ImageLightbox key='lightbox' {...lightbox} onClose={closeLightbox} />}
+        </AnimatePresence>
     </main>
   )
 }

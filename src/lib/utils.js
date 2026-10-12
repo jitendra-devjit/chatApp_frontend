@@ -5,6 +5,20 @@ export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"
 export const MAX_MESSAGE_LENGTH = 2000;
 export const MAX_BIO_LENGTH = 160;
 
+// emoji offered when reacting to a message
+export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+// the server lets a message be edited for this long
+export const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+// accent colour themes, the first one is the default. Colours are the gradient stops in index.css
+export const ACCENTS = [
+    { id: "aurora", name: "Aurora", colors: ["#7c5cff", "#b85cff", "#ff5ca8"] },
+    { id: "ocean", name: "Ocean", colors: ["#2f7bff", "#1fb0ff", "#1fe0c8"] },
+    { id: "sunset", name: "Sunset", colors: ["#ff7a3d", "#ff4d6d", "#d946ef"] },
+    { id: "mint", name: "Mint", colors: ["#0fb981", "#12c8b4", "#38bdf8"] },
+    { id: "rose", name: "Rose", colors: ["#ff4d7d", "#ff6f91", "#ffb057"] },
+];
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -44,6 +58,18 @@ export function formatListTime(date){
     return d.toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
+// "last seen today at 9:40 pm" for somebody who is offline
+export function formatLastSeen(date){
+    if (!date) return "Offline";
+    const d = new Date(date);
+    const diff = daysAgo(d);
+    const time = formatMessageTime(d);
+    if (diff === 0) return `last seen today at ${time}`;
+    if (diff === 1) return `last seen yesterday at ${time}`;
+    if (diff < 7) return `last seen ${d.toLocaleDateString([], { weekday: "long" })} at ${time}`;
+    return `last seen ${d.toLocaleDateString([], { day: "numeric", month: "short" })}`;
+}
+
 export const isSameDay = (a, b) => startOfDay(new Date(a)).getTime() === startOfDay(new Date(b)).getTime();
 
 // message the server sent, or a readable fallback when it could not be reached
@@ -60,13 +86,17 @@ export function getInitials(name = ""){
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const AVATAR_COLORS = ["#e9d3ae", "#c7d9c2", "#d5c8ea", "#f1c3b2", "#bcd6ea", "#e4dfa2", "#eac1d3", "#b9dcd3"];
-
-// the same name always gets the same colour
-export function getAvatarColor(name = ""){
+// the same name always gets the same two-tone gradient
+export function getAvatarGradient(name = ""){
     let hash = 0;
     for (const char of name) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-    return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+    const hue = hash % 360;
+    return `linear-gradient(135deg, hsl(${hue} 78% 62%), hsl(${(hue + 48) % 360} 74% 48%))`;
+}
+
+export function formatJoined(date){
+    if (!date) return "";
+    return new Date(date).toLocaleDateString([], { month: "long", year: "numeric" });
 }
 
 // returns an error text when the file cannot be sent, otherwise null
@@ -74,6 +104,34 @@ export function validateImageFile(file){
     if (!file || !IMAGE_TYPES.includes(file.type)) return "Choose a PNG, JPG, WEBP or GIF image";
     if (file.size > MAX_IMAGE_BYTES) return "Image must be smaller than 3 MB";
     return null;
+}
+
+// Cuts the middle square out of a picture and shrinks it, so a profile photo
+// always fits and uploads fast. Resolves to a JPEG data URL
+export function cropToSquare(file, size = 640){
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+            const side = Math.min(image.naturalWidth, image.naturalHeight);
+            const target = Math.min(size, side);
+            const canvas = document.createElement("canvas");
+            canvas.width = target;
+            canvas.height = target;
+            canvas.getContext("2d").drawImage(
+                image,
+                (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side,
+                0, 0, target, target
+            );
+            URL.revokeObjectURL(url);
+            resolve(canvas.toDataURL("image/jpeg", 0.9));
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("Could not read the image"));
+        };
+        image.src = url;
+    });
 }
 
 export function fileToDataUrl(file){

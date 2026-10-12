@@ -1,40 +1,61 @@
 import React, { useState } from 'react'
-import { getAvatarColor, getInitials } from '../lib/utils'
+import { getAvatarGradient, getInitials } from '../lib/utils'
 
 const SIZES = {
-  sm: 'w-8 h-8 text-[11px] rounded-[10px]',
-  md: 'w-11 h-11 text-sm rounded-[14px]',
-  lg: 'w-24 h-24 text-3xl rounded-[30px]',
-  xl: 'w-32 h-32 text-4xl rounded-[38px]',
+  xs: 'w-7 h-7 text-[10px]',
+  sm: 'w-9 h-9 text-xs',
+  md: 'w-12 h-12 text-[15px]',
+  lg: 'w-16 h-16 text-xl',
+  xl: 'w-28 h-28 text-4xl',
+  '2xl': 'w-36 h-36 text-5xl',
 }
 
-// Profile picture, or the person's initials on their own colour when there is none
-const Avatar = ({ user, src, size = 'md', online = false, className = '' }) => {
+const DOTS = {
+  xs: 'w-2 h-2 ring-2',
+  sm: 'w-2.5 h-2.5 ring-2',
+  md: 'w-3.5 h-3.5 ring-[3px]',
+  lg: 'w-4 h-4 ring-[3px]',
+  xl: 'w-5 h-5 ring-4 bottom-1 right-1',
+  '2xl': 'w-6 h-6 ring-4 bottom-1.5 right-1.5',
+}
+
+// Profile picture, or the person's initials on their own gradient when there is none.
+// `ring` wraps it in the accent gradient, `online` adds the live dot
+const Avatar = ({ user, src, size = 'md', online = false, ring = false, className = '' }) => {
   const [failedSrc, setFailedSrc] = useState(null)
   const name = user?.fullName || ''
   const image = src ?? user?.profilePic
   const showImage = image && failedSrc !== image
 
+  const face = showImage ? (
+    <img
+      src={image}
+      alt=""
+      draggable={false}
+      onError={() => setFailedSrc(image)}
+      className={`${SIZES[size]} rounded-full object-cover bg-raised`}
+    />
+  ) : (
+    <div
+      aria-hidden="true"
+      style={{ backgroundImage: getAvatarGradient(name) }}
+      className={`${SIZES[size]} grid place-items-center rounded-full font-bold tracking-tight text-white select-none`}
+    >
+      {getInitials(name)}
+    </div>
+  )
+
   return (
-    <div className={`relative shrink-0 ${className}`}>
-      {showImage ? (
-        <img
-          src={image}
-          alt=""
-          onError={() => setFailedSrc(image)}
-          className={`${SIZES[size]} object-cover bg-raised`}
-        />
-      ) : (
-        <div
-          aria-hidden="true"
-          style={{ backgroundColor: getAvatarColor(name) }}
-          className={`${SIZES[size]} grid place-items-center font-semibold tracking-tight text-[#191917] select-none`}
-        >
-          {getInitials(name)}
+    <div className={`relative shrink-0 w-fit ${className}`}>
+      {ring ? (
+        <div className='grad rounded-full p-[3px]'>
+          <div className='rounded-full bg-panel-solid p-[3px]'>{face}</div>
         </div>
-      )}
+      ) : face}
       {online && (
-        <span className='absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent ring-[2.5px] ring-surface' />
+        <span className={`absolute bottom-0 right-0 rounded-full bg-online ring-panel-solid ${DOTS[size]}`}>
+          <span className='absolute inset-0 rounded-full bg-online animate-ping-soft' />
+        </span>
       )}
     </div>
   )

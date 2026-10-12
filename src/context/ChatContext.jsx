@@ -2,13 +2,20 @@ import React, { createContext, useState, useEffect, useContext, useRef, useCallb
 import { AuthContext } from "./AuthContext.jsx";
 import toast from "react-hot-toast";
 import { APP_NAME, getErrorMessage } from "../lib/utils";
+import { isNotifyEnabled, playMessageSound, showNotification } from "../lib/notify";
 
 export const ChatContext = createContext();
 
+// how long "typing" stays on screen without a fresh signal
+const TYPING_TIMEOUT_MS = 5000;
+
 const toPreview = (message) => ({
+  _id: message._id,
   text: message.text || "",
   hasImage: Boolean(message.image),
+  deleted: Boolean(message.deletedAt),
   senderId: message.senderId,
+  seen: Boolean(message.seen),
   createdAt: message.createdAt,
 });
 
@@ -22,12 +29,20 @@ export const ChatProvider = ({ children }) => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [unseenMessages, setUnseenMessages] = useState({});
   const [lastMessages, setLastMessages] = useState({});
+  const [typingUsers, setTypingUsers] = useState({}); // ids of people typing to me right now
 
   const { socket, axios, authUser, onlineUsers } = useContext(AuthContext);
 
   // always the id of the open chat, so slow responses for another chat are dropped
   const selectedIdRef = useRef(null);
   selectedIdRef.current = selectedUser?._id || null;
+
+  // the latest list of people, readable inside socket handlers without re-subscribing
+  const usersRef = useRef(users);
+  usersRef.current = users;
+
+  // per person, the timer that clears "typing" if their stop signal never arrives
+  const typingTimers = useRef({});
 
   const authUserId = authUser?._id;
 
@@ -61,6 +76,7 @@ export const ChatProvider = ({ children }) => {
     setSelectedUser(null);
     setUnseenMessages({});
     setLastMessages({});
+    setTypingUsers({});
   }, [authUserId, getUsers]);
 
   // somebody who signed up after the list was loaded came online
@@ -147,13 +163,91 @@ export const ChatProvider = ({ children }) => {
     }
   };
 
+  // A message was edited, deleted or reacted to: swap it in wherever it is shown
+  const applyMessageUpdate = useCallback((updated) => {
+    setMessages((prevMessages) =>
+      prevMessages.map((message) => {
+        if (message._id === updated._id) return { ...updated, seen: message.seen || updated.seen };
+        // replies quote it, their copy changes too
+        if (message.replyTo?._id === updated._id) {
+          const { _id, text, image, senderId, deletedAt } = updated;
+          return { ...message, replyTo: { _id, text, image, senderId, deletedAt } };
+        }
+        return message;
+      })
+    );
+    const otherId = updated.senderId === authUserId ? updated.receiverId : updated.senderId;
+    setLastMessages((prev) => (prev[otherId]?._id === updated._id ? { ...prev, [otherId]: toPreview(updated) } : prev));
+  }, [authUserId]);
+
+  // runs one of the message actions and shows the result. Resolves to true on success
+  const runMessageAction = async (request) => {
+    try {
+      const { data } = await request();
+      applyMessageUpdate(data.message);
+      return true;
+    } catch (error) {
+      if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+      return false;
+    }
+  };
+
+  const editMessage = (messageId, text) => runMessageAction(() => axios.put(`/api/messages/${messageId}`, { text }));
+  const deleteMessage = (messageId) => runMessageAction(() => axios.delete(`/api/messages/${messageId}`));
+  // the same emoji again removes the reaction
+  const reactToMessage = (messageId, emoji) =>
+    runMessageAction(() => axios.put(`/api/messages/${messageId}/reaction`, { emoji }));
+
   //subscribe to incoming messages
   useEffect(() => {
     if (!socket) return;
 
+    const setTyping = (userId, isTyping) => {
+      clearTimeout(typingTimers.current[userId]);
+      if (isTyping) {
+        typingTimers.current[userId] = setTimeout(() => setTyping(userId, false), TYPING_TIMEOUT_MS);
+      }
+      setTypingUsers((prev) => {
+        if (Boolean(prev[userId]) === isTyping) return prev;
+        const next = { ...prev };
+        if (isTyping) next[userId] = true;
+        else delete next[userId];
+        return next;
+      });
+    };
+
+    const handleTyping = ({ from, isTyping }) => setTyping(from, isTyping);
+
+    // the other person read what I sent them
+    const handleMessagesSeen = ({ by }) => {
+      setLastMessages((prev) =>
+        prev[by] && prev[by].senderId !== by && !prev[by].seen ? { ...prev, [by]: { ...prev[by], seen: true } } : prev
+      );
+      if (selectedIdRef.current === by) {
+        setMessages((prevMessages) =>
+          prevMessages.map((message) => (message.receiverId === by && !message.seen ? { ...message, seen: true } : message))
+        );
+      }
+    };
+
     const handleNewMessage = (newMessage) => {
       const { senderId } = newMessage;
+      setTyping(senderId, false);
       setLastMessages((prev) => ({ ...prev, [senderId]: toPreview(newMessage) }));
+
+      // sound and a system notification, unless the user is looking at this very chat
+      const isBeingRead = selectedIdRef.current === senderId && !document.hidden;
+      if (!isBeingRead && isNotifyEnabled()) {
+        const sender = usersRef.current.find((user) => user._id === senderId);
+        playMessageSound();
+        showNotification({
+          title: sender?.fullName || "New message",
+          body: newMessage.text || "Sent a photo",
+          icon: sender?.profilePic,
+          tag: senderId,
+          onClick: () => sender && selectUser(sender),
+        });
+      }
 
       if (selectedIdRef.current === senderId) {
         setMessages((prevMessages) =>
@@ -170,9 +264,32 @@ export const ChatProvider = ({ children }) => {
       }
     };
 
+    // somebody went offline
+    const handleLastSeen = ({ userId, lastSeen }) => {
+      setUsers((prev) => prev.map((user) => (user._id === userId ? { ...user, lastSeen } : user)));
+      setSelectedUser((prev) => (prev?._id === userId ? { ...prev, lastSeen } : prev));
+    };
+
+    const timers = typingTimers.current;
+    socket.on("messageUpdated", applyMessageUpdate);
+    socket.on("lastSeen", handleLastSeen);
     socket.on("newMessage", handleNewMessage);
-    return () => socket.off("newMessage", handleNewMessage);
-  }, [socket, axios]);
+    socket.on("typing", handleTyping);
+    socket.on("messagesSeen", handleMessagesSeen);
+    return () => {
+      socket.off("messageUpdated", applyMessageUpdate);
+      socket.off("lastSeen", handleLastSeen);
+      socket.off("newMessage", handleNewMessage);
+      socket.off("typing", handleTyping);
+      socket.off("messagesSeen", handleMessagesSeen);
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, [socket, axios, applyMessageUpdate, selectUser]);
+
+  // tell a person that I started or stopped typing to them
+  const sendTyping = useCallback((userId, isTyping) => {
+    if (socket && userId) socket.emit("typing", { to: userId, isTyping });
+  }, [socket]);
 
   // after a dropped connection comes back, catch up on what was missed
   useEffect(() => {
@@ -199,6 +316,11 @@ export const ChatProvider = ({ children }) => {
     selectUser,
     loadOlderMessages,
     sendMessage,
+    editMessage,
+    deleteMessage,
+    reactToMessage,
+    sendTyping,
+    typingUsers,
     unseenMessages,
     lastMessages,
   };
