@@ -1,6 +1,6 @@
 # Adda
 
-A realtime one-to-one chat app. Messages arrive the moment they are sent, with typing indicators, read receipts, photos and live presence, in a glassy interface with five colour themes and a dark and a light mode.
+A realtime chat app with one-to-one and group conversations. Messages arrive the moment they are sent, with typing indicators, read receipts, photos and live presence, in a glassy interface with five colour themes and a dark and a light mode.
 
 ![Chat in the dark theme](docs/chat-dark.png)
 
@@ -18,7 +18,10 @@ This is the frontend. The API and realtime server live in [chatApp_backend](http
 
 - Realtime messaging over Socket.IO, synced across every open tab
 - Typing indicator and read receipts (sent and seen ticks)
+- Group chats with admins: add and remove people, promote, rename, leave
 - Reply to a message, react with an emoji, edit and delete for everyone
+- Search inside a chat (`Ctrl + F`) and jump to any old message
+- Pin, mute and archive chats, filter the list by unread or groups
 - Last seen, message sound and browser notifications
 - Photo sharing with preview before sending, paste from clipboard and a full screen viewer
 - Live online status, unread counts in the sidebar and in the browser tab

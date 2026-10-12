@@ -1,14 +1,16 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDown, ArrowLeft, CircleNotch, Info, Lightning, Trash } from '@phosphor-icons/react'
+import { ArrowDown, ArrowLeft, CircleNotch, Info, Lightning, MagnifyingGlass, Trash } from '@phosphor-icons/react'
 import { formatDayLabel, formatLastSeen, isSameDay } from '../lib/utils'
 import { AuthContext } from '../context/AuthContext';
 import { ChatContext } from '../context/ChatContext';
 import Avatar from './Avatar';
+import ChatSearch from './ChatSearch';
 import IconButton from './IconButton';
 import { LogoMark } from './Logo';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
+import { ConfirmDialog } from './Modal';
 import TypingDots from './TypingDots';
 
 // messages from one person less than this apart are shown as one block
@@ -21,7 +23,7 @@ const HIGHLIGHT_MS = 1600;
 const bubbleSpring = { type: 'spring', stiffness: 520, damping: 34, mass: 0.8 };
 
 const isGroupedWith = (a, b) =>
-  a && b && a.senderId === b.senderId && isSameDay(a.createdAt, b.createdAt) &&
+  a && b && !a.system && !b.system && a.senderId === b.senderId && isSameDay(a.createdAt, b.createdAt) &&
   Math.abs(new Date(b.createdAt) - new Date(a.createdAt)) < GROUP_GAP_MS;
 
 const MessageSkeleton = () => (
@@ -56,34 +58,10 @@ const EmptyState = () => (
   </section>
 )
 
-const DeleteDialog = ({ onConfirm, onCancel }) => (
-  <motion.div role='alertdialog' aria-modal='true' aria-label='Delete message' onClick={onCancel}
-    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    className='fixed inset-0 z-50 grid place-items-center p-4 bg-overlay backdrop-blur-sm'>
-    <motion.div onClick={(e) => e.stopPropagation()}
-      initial={{ opacity: 0, scale: 0.9, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94 }} transition={bubbleSpring}
-      className='w-full max-w-xs p-6 rounded-[28px] bg-panel-solid border border-line-strong shadow-2xl text-center'>
-      <div className='grid place-items-center w-14 h-14 mx-auto rounded-full bg-[color-mix(in_oklab,var(--danger)_16%,transparent)] text-danger'>
-        <Trash size={26} weight='duotone' />
-      </div>
-      <h2 className='mt-4 text-lg font-extrabold tracking-tight'>Delete this message?</h2>
-      <p className='mt-1.5 text-sm text-muted'>It will be removed for both of you. This cannot be undone.</p>
-      <div className='mt-6 grid grid-cols-2 gap-2.5'>
-        <button type='button' onClick={onCancel} className='h-11 rounded-2xl bg-raised border border-line text-sm font-bold hover:bg-hover transition-colors'>
-          Cancel
-        </button>
-        <button type='button' onClick={onConfirm} autoFocus className='h-11 rounded-2xl bg-danger text-white text-sm font-bold hover:brightness-110 transition'>
-          Delete
-        </button>
-      </div>
-    </motion.div>
-  </motion.div>
-)
-
 const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const {
-    messages, hasMore, isLoadingMessages, isLoadingOlder, loadOlderMessages, selectedUser, selectUser,
-    sendMessage, editMessage, deleteMessage, reactToMessage, sendTyping, typingUsers,
+    messages, hasMore, isLoadingMessages, isLoadingOlder, loadOlderMessages, selectedChat, selectChat, users,
+    sendMessage, editMessage, deleteMessage, reactToMessage, sendTyping, typing, jumpTarget,
   } = useContext(ChatContext);
   const { authUser, onlineUsers } = useContext(AuthContext);
 
@@ -92,13 +70,16 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const [editingMessage, setEditingMessage] = useState(null); // message whose text is in the composer
   const [deleteTarget, setDeleteTarget] = useState(null); // message waiting for "are you sure"
   const [openMenu, setOpenMenu] = useState(null); // { id, type, below } of the open message popover
-  const [highlightId, setHighlightId] = useState(null); // quoted message the user jumped to
+  const [highlightId, setHighlightId] = useState(null); // message the user jumped to
+  const [isSearching, setIsSearching] = useState(false);
   const scrollRef = useRef(null);
   // what the list looked like after the previous render, to decide how to scroll now
   const snapshot = useRef({ chatId: null, firstId: null, lastId: null, height: 0 });
 
-  const selectedId = selectedUser?._id;
-  const isTyping = Boolean(selectedId && typingUsers[selectedId]);
+  const selectedId = selectedChat?._id;
+  const isGroup = Boolean(selectedChat?.isGroup);
+  const typingIds = Object.keys((selectedId && typing[selectedId]) || {});
+  const isTyping = typingIds.length > 0;
 
   // nothing from the previous chat carries over
   useEffect(() => {
@@ -106,6 +87,20 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     setEditingMessage(null);
     setDeleteTarget(null);
     setOpenMenu(null);
+    setIsSearching(false);
+  }, [selectedId]);
+
+  // Ctrl+F (or Cmd+F) searches the open chat instead of the page
+  useEffect(() => {
+    if (!selectedId) return;
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setIsSearching(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedId]);
 
   // a message popover closes on a click elsewhere, on Escape and when the list scrolls
@@ -153,6 +148,21 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     snapshot.current = { chatId: selectedId, firstId, lastId, height: el.scrollHeight };
   }, [messages, selectedId, authUser._id]);
 
+  // scroll to a message and flash it. Returns false when it is not on screen
+  const showMessage = (messageId) => {
+    const target = document.getElementById(`msg-${messageId}`);
+    if (!target) return false;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlightId(messageId);
+    setTimeout(() => setHighlightId((current) => (current === messageId ? null : current)), HIGHLIGHT_MS);
+    return true;
+  };
+
+  // a search result was opened: by now its message is loaded and drawn
+  useEffect(() => {
+    if (jumpTarget) showMessage(jumpTarget.id);
+  }, [jumpTarget]);
+
   // the typing bubble appears below the last message, keep it in view
   const isAtBottomRef = useRef(isAtBottom);
   isAtBottomRef.current = isAtBottom;
@@ -172,22 +182,40 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     if (isAtBottom) scrollToBottom();
   };
 
-  if (!selectedUser) return <EmptyState />;
+  if (!selectedChat) return <EmptyState />;
 
-  const isOnline = onlineUsers.includes(selectedId);
-  const firstName = selectedUser.fullName.split(' ')[0];
+  const isOnline = !isGroup && onlineUsers.includes(selectedId);
+  const firstName = selectedChat.fullName.split(' ')[0];
+  const members = isGroup ? selectedChat.members : [];
+  const otherMembers = members.filter((member) => member.user._id !== authUser._id);
 
-  // scroll to the message a reply quotes and flash it
+  // the person behind an id: a member of this group, the other person of this chat, or anybody known
+  const findUser = (userId) => {
+    if (userId === authUser._id) return authUser;
+    if (!isGroup && userId === selectedId) return selectedChat;
+    return members.find((member) => member.user._id === userId)?.user || users.find((user) => user._id === userId) || null;
+  };
+  const getName = (userId) => (userId === authUser._id ? 'You' : findUser(userId)?.fullName.split(' ')[0] || 'Someone');
+
+  // one-to-one: the other person opened it. Group: every other member has read past it
+  const isSeen = (message) =>
+    isGroup
+      ? otherMembers.length > 0 && otherMembers.every((member) => new Date(member.lastReadAt) >= new Date(message.createdAt))
+      : Boolean(message.seen);
+
+  const typingText = isGroup
+    ? `${typingIds.slice(0, 2).map(getName).join(' and ')}${typingIds.length > 2 ? ' and others' : ''} ${typingIds.length > 1 ? 'are' : 'is'} typing`
+    : 'typing';
+
+  const onlineMembers = otherMembers.filter((member) => onlineUsers.includes(member.user._id)).length;
+  const statusText = isGroup
+    ? `${members.length} members${onlineMembers > 0 ? ` · ${onlineMembers} online` : ''}`
+    : isOnline ? 'Online' : formatLastSeen(selectedChat.lastSeen);
+
+  // a quote was clicked
   const jumpToMessage = (messageId) => {
-    const target = document.getElementById(`msg-${messageId}`);
-    if (!target) {
-      // it is further back than what is loaded
-      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    setHighlightId(messageId);
-    setTimeout(() => setHighlightId((current) => (current === messageId ? null : current)), HIGHLIGHT_MS);
+    // it can be further back than what is loaded
+    if (!showMessage(messageId)) scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const startReply = (message) => {
@@ -223,32 +251,41 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   return (
     <section className='glass relative flex-1 flex flex-col min-h-0 min-w-0 md:rounded-[28px] overflow-hidden max-md:border-0'>
       {/* ---------------- header ---------------- */}
-      <header className='flex items-center gap-2 h-[72px] px-3 sm:px-5 shrink-0 border-b border-line'>
-        <IconButton label='Back to conversations' onClick={() => selectUser(null)} className='md:hidden -ml-1'>
+      <header className='flex items-center gap-1 h-[72px] px-3 sm:px-5 shrink-0 border-b border-line'>
+        <IconButton label='Back to conversations' onClick={() => selectChat(null)} className='md:hidden -ml-1'>
           <ArrowLeft size={22} weight='bold' />
         </IconButton>
-        <button type='button' onClick={onToggleDetails} aria-label={`About ${selectedUser.fullName}`}
+        <button type='button' onClick={onToggleDetails} aria-label={`About ${selectedChat.fullName}`}
           className='flex items-center gap-3 flex-1 min-w-0 py-1 pr-3 text-left rounded-2xl'>
-          <Avatar user={selectedUser} online={isOnline} />
+          <Avatar user={selectedChat} group={isGroup} online={isOnline} />
           <div className='min-w-0 leading-tight'>
-            <p className='truncate font-bold text-base'>{selectedUser.fullName}</p>
+            <p className='truncate font-bold text-base'>{selectedChat.fullName}</p>
             <p data-status className={`mt-0.5 flex items-center gap-1.5 truncate text-[13px] font-medium ${isTyping ? 'text-accent-text' : isOnline ? 'text-online' : 'text-faint'}`}>
-              {isTyping ? <>typing <TypingDots /></> : isOnline ? 'Online' : formatLastSeen(selectedUser.lastSeen)}
+              {isTyping ? <>{typingText} <TypingDots /></> : statusText}
             </p>
           </div>
         </button>
+        <IconButton label='Search in this chat' active={isSearching} onClick={() => setIsSearching(!isSearching)}>
+          <MagnifyingGlass size={21} weight={isSearching ? 'bold' : 'regular'} />
+        </IconButton>
         <IconButton label={isDetailsOpen ? 'Hide details' : 'Show details'} active={isDetailsOpen} onClick={onToggleDetails}>
           <Info size={23} weight={isDetailsOpen ? 'fill' : 'duotone'} />
         </IconButton>
       </header>
+
+      <AnimatePresence>
+        {isSearching && <ChatSearch key='search' getName={getName} onClose={() => setIsSearching(false)} />}
+      </AnimatePresence>
 
       {/* ---------------- chat body ---------------- */}
       <div ref={scrollRef} onScroll={handleScroll} data-scroller className='flex-1 min-h-0 overflow-y-auto'>
         <div className='flex flex-col min-h-full max-w-3xl mx-auto px-3 sm:px-6 py-4'>
           {isLoadingMessages ? <MessageSkeleton /> : messages.length === 0 ? (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className='m-auto py-10 text-center'>
-              <Avatar user={selectedUser} size='xl' ring className='mx-auto' />
-              <p className='mt-6 text-2xl font-extrabold tracking-tight'>Say hello to <span className='grad-text'>{firstName}</span> 👋</p>
+              <Avatar user={selectedChat} size='xl' ring className='mx-auto' />
+              <p className='mt-6 text-2xl font-extrabold tracking-tight'>
+                {isGroup ? <>Welcome to <span className='grad-text'>{selectedChat.fullName}</span></> : <>Say hello to <span className='grad-text'>{firstName}</span> 👋</>}
+              </p>
               <p className='mt-2 text-sm text-muted'>This is the very beginning of your conversation.</p>
             </motion.div>
           ) : (
@@ -265,6 +302,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
               {messages.map((msg, index) => {
                 const prev = messages[index - 1];
                 const next = messages[index + 1];
+                const isOwn = msg.senderId === authUser._id;
                 const isNewDay = !prev || !isSameDay(prev.createdAt, msg.createdAt);
 
                 return (
@@ -276,26 +314,35 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                         </span>
                       </div>
                     )}
-                    <MessageBubble
-                      msg={msg}
-                      isOwn={msg.senderId === authUser._id}
-                      isNewDay={isNewDay}
-                      isGroupStart={!isGroupedWith(prev, msg)}
-                      isGroupEnd={!isGroupedWith(msg, next)}
-                      isFresh={Date.now() - new Date(msg.createdAt).getTime() < FRESH_MESSAGE_MS}
-                      isHighlighted={highlightId === msg._id}
-                      myId={authUser._id}
-                      otherName={firstName}
-                      openMenu={openMenu}
-                      setOpenMenu={setOpenMenu}
-                      onReply={startReply}
-                      onEdit={startEdit}
-                      onDelete={setDeleteTarget}
-                      onReact={(message, emoji) => reactToMessage(message._id, emoji)}
-                      onOpenImage={(src) => onOpenImage({ src, title: msg.senderId === authUser._id ? 'You' : selectedUser.fullName })}
-                      onJumpTo={jumpToMessage}
-                      onImageLoad={handleImageLoad}
-                    />
+                    {msg.system ? (
+                      // a line written by the server, like "Aarav added Sara"
+                      <p data-system className='self-center max-w-[85%] my-2 px-3 py-1 rounded-full bg-raised text-center text-xs font-medium text-muted'>
+                        {msg.text}
+                      </p>
+                    ) : (
+                      <MessageBubble
+                        msg={msg}
+                        isOwn={isOwn}
+                        isNewDay={isNewDay}
+                        isGroupStart={!isGroupedWith(prev, msg)}
+                        isGroupEnd={!isGroupedWith(msg, next)}
+                        isFresh={Date.now() - new Date(msg.createdAt).getTime() < FRESH_MESSAGE_MS}
+                        isHighlighted={highlightId === msg._id}
+                        seen={isSeen(msg)}
+                        myId={authUser._id}
+                        sender={isGroup && !isOwn ? findUser(msg.senderId) || { fullName: 'Someone' } : null}
+                        getName={getName}
+                        openMenu={openMenu}
+                        setOpenMenu={setOpenMenu}
+                        onReply={startReply}
+                        onEdit={startEdit}
+                        onDelete={setDeleteTarget}
+                        onReact={(message, emoji) => reactToMessage(message._id, emoji)}
+                        onOpenImage={(src) => onOpenImage({ src, title: isOwn ? 'You' : findUser(msg.senderId)?.fullName })}
+                        onJumpTo={jumpToMessage}
+                        onImageLoad={handleImageLoad}
+                      />
+                    )}
                   </React.Fragment>
                 );
               })}
@@ -327,15 +374,19 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
       </AnimatePresence>
 
       {/* ---------------- bottom area ---------------- */}
-      <MessageComposer key={selectedId} recipientName={firstName} onSend={handleSend}
-        onTyping={(isTypingNow) => sendTyping(selectedId, isTypingNow)}
-        replyingTo={replyingTo && { ...replyingTo, authorName: replyingTo.senderId === authUser._id ? 'yourself' : firstName }}
+      <MessageComposer key={selectedId} recipientName={isGroup ? selectedChat.fullName : firstName} onSend={handleSend}
+        onTyping={(isTypingNow) => sendTyping(selectedChat, isTypingNow)}
+        replyingTo={replyingTo && { ...replyingTo, authorName: replyingTo.senderId === authUser._id ? 'yourself' : getName(replyingTo.senderId) }}
         editingMessage={editingMessage}
         onCancelReply={() => setReplyingTo(null)}
         onCancelEdit={() => setEditingMessage(null)} />
 
       <AnimatePresence>
-        {deleteTarget && <DeleteDialog key='delete' onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />}
+        {deleteTarget && (
+          <ConfirmDialog key='delete' danger icon={<Trash size={26} weight='duotone' />}
+            title='Delete this message?' text='It will be removed for everyone in this chat. This cannot be undone.'
+            confirmLabel='Delete' onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
+        )}
       </AnimatePresence>
     </section>
   );

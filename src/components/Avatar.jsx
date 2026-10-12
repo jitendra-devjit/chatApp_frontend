@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { UsersThree } from '@phosphor-icons/react'
 import { getAvatarGradient, getInitials } from '../lib/utils'
 
 const SIZES = {
@@ -19,9 +20,18 @@ const DOTS = {
   '2xl': 'w-6 h-6 ring-4 bottom-1.5 right-1.5',
 }
 
+const BADGES = {
+  xs: 'w-3 h-3 ring-1',
+  sm: 'w-4 h-4 ring-2',
+  md: 'w-5 h-5 ring-2',
+  lg: 'w-6 h-6 ring-[3px]',
+  xl: 'w-8 h-8 ring-4',
+  '2xl': 'w-9 h-9 ring-4',
+}
+
 // Profile picture, or the person's initials on their own gradient when there is none.
-// `ring` wraps it in the accent gradient, `online` adds the live dot
-const Avatar = ({ user, src, size = 'md', online = false, ring = false, className = '' }) => {
+// `ring` wraps it in the accent gradient, `online` adds the live dot, `group` a small people badge
+const Avatar = ({ user, src, size = 'md', online = false, ring = false, group = false, className = '' }) => {
   const [failedSrc, setFailedSrc] = useState(null)
   const name = user?.fullName || ''
   const image = src ?? user?.profilePic
@@ -52,7 +62,12 @@ const Avatar = ({ user, src, size = 'md', online = false, ring = false, classNam
           <div className='rounded-full bg-panel-solid p-[3px]'>{face}</div>
         </div>
       ) : face}
-      {online && (
+      {group && (
+        <span className={`absolute -bottom-0.5 -right-0.5 grid place-items-center rounded-full grad text-white ring-panel-solid ${BADGES[size]}`}>
+          <UsersThree weight='fill' className='w-[62%] h-[62%]' />
+        </span>
+      )}
+      {online && !group && (
         <span className={`absolute bottom-0 right-0 rounded-full bg-online ring-panel-solid ${DOTS[size]}`}>
           <span className='absolute inset-0 rounded-full bg-online animate-ping-soft' />
         </span>

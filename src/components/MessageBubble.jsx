@@ -2,7 +2,8 @@ import React from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowBendUpLeft, Check, Checks, Copy, DotsThree, Image as ImageIcon, PencilSimple, Prohibit, Smiley, Trash } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
-import { EDIT_WINDOW_MS, formatMessageTime, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
+import { EDIT_WINDOW_MS, formatMessageTime, getNameColor, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
+import Avatar from './Avatar'
 
 const bubbleSpring = { type: 'spring', stiffness: 520, damping: 34, mass: 0.8 };
 const popSpring = { type: 'spring', stiffness: 560, damping: 30 };
@@ -24,10 +25,12 @@ const groupReactions = (reactions = [], myId) => {
 
 // One message with its quote, reactions, time and the actions that appear on hover (or on tap on a phone).
 // `openMenu` is { id, type, below } of the popover that is open anywhere in the list, type is
-// 'actions' (phone tap), 'react' or 'more'
+// 'actions' (phone tap), 'react' or 'more'.
+// In a group, `sender` is given for other people's messages: their name and picture are shown.
+// `getName(userId)` gives the first name to show for the author of a quoted message
 const MessageBubble = ({
-  msg, isOwn, isGroupStart, isGroupEnd, isNewDay, isFresh, isHighlighted,
-  myId, otherName, openMenu, setOpenMenu,
+  msg, isOwn, isGroupStart, isGroupEnd, isNewDay, isFresh, isHighlighted, seen,
+  myId, sender, getName, openMenu, setOpenMenu,
   onReply, onEdit, onDelete, onReact, onOpenImage, onJumpTo, onImageLoad,
 }) => {
   const isDeleted = Boolean(msg.deletedAt);
@@ -70,7 +73,9 @@ const MessageBubble = ({
   const popoverSide = `${menu?.below ? 'top-full mt-1' : 'bottom-full mb-1'} ${isOwn ? 'right-0' : 'left-0'}`;
   const popoverOrigin = `${menu?.below ? 'origin-top' : 'origin-bottom'}${isOwn ? '-right' : '-left'}`;
 
-  const replyAuthor = msg.replyTo && (msg.replyTo.senderId === myId ? 'You' : otherName);
+  const replyAuthor = msg.replyTo && (msg.replyTo.senderId === myId ? 'You' : getName(msg.replyTo.senderId));
+  // other people's messages in a group leave room on the left for the sender's picture
+  const indent = sender ? 'ml-9' : '';
 
   return (
     <motion.div
@@ -80,7 +85,13 @@ const MessageBubble = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={bubbleSpring}
       className={`group/msg flex flex-col w-full ${isOwn ? 'items-end origin-bottom-right' : 'items-start origin-bottom-left'} ${isGroupStart && !isNewDay ? 'mt-3' : 'mt-[3px]'} ${menu ? 'relative z-20' : ''}`}>
+      {sender && isGroupStart && (
+        <p data-sender className='ml-10 mb-0.5 text-xs font-bold' style={{ color: getNameColor(sender.fullName) }}>{sender.fullName}</p>
+      )}
       <div className={`flex items-center gap-1 w-full ${isOwn ? 'flex-row-reverse' : ''}`}>
+        {sender && (
+          <div className='w-7 shrink-0 self-end mr-1'>{isGroupEnd && <Avatar user={sender} size='xs' />}</div>
+        )}
         <div onClick={handleBubbleTap}
           className={`flex flex-col min-w-0 max-w-[80%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''}`}>
           {msg.image && !isDeleted && (
@@ -180,7 +191,7 @@ const MessageBubble = ({
       </div>
 
       {reactions.length > 0 && (
-        <div className={`relative z-10 flex flex-wrap gap-1 -mt-1.5 px-2 ${isOwn ? 'justify-end' : ''}`}>
+        <div className={`relative z-10 flex flex-wrap gap-1 -mt-1.5 px-2 ${indent} ${isOwn ? 'justify-end' : ''}`}>
           {reactions.map(({ emoji, count, mine }) => (
             <motion.button key={emoji} type='button' data-reaction onClick={() => onReact(msg, emoji)}
               initial={{ scale: 0 }} animate={{ scale: 1 }} whileTap={{ scale: 0.85 }} transition={popSpring}
@@ -194,10 +205,10 @@ const MessageBubble = ({
       )}
 
       {isGroupEnd && (
-        <span className='mt-1 px-1.5 flex items-center gap-1 text-[11px] font-medium tabular-nums text-faint'>
+        <span className={`mt-1 px-1.5 flex items-center gap-1 text-[11px] font-medium tabular-nums text-faint ${indent}`}>
           {msg.editedAt && !isDeleted && <span data-edited>edited ·</span>}
           <time>{formatMessageTime(msg.createdAt)}</time>
-          {isOwn && !isDeleted && (msg.seen
+          {isOwn && !isDeleted && (seen
             ? <Checks size={15} weight='bold' className='text-accent-text' data-seen aria-label='Seen' />
             : <Check size={14} weight='bold' aria-label='Sent' />)}
         </span>

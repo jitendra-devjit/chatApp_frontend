@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext, useRef, useCallback } from "react";
+import React, { createContext, useState, useEffect, useContext, useRef, useCallback, useMemo } from "react";
 import { AuthContext } from "./AuthContext.jsx";
 import toast from "react-hot-toast";
 import { APP_NAME, getErrorMessage } from "../lib/utils";
@@ -14,10 +14,33 @@ const toPreview = (message) => ({
   text: message.text || "",
   hasImage: Boolean(message.image),
   deleted: Boolean(message.deletedAt),
+  system: Boolean(message.system),
   senderId: message.senderId,
   seen: Boolean(message.seen),
   createdAt: message.createdAt,
 });
+
+// A group gets the same fields a person has (fullName, profilePic, bio), so lists,
+// avatars and headers can show both without caring which one it is
+const toGroupChat = (group) => ({
+  ...group,
+  isGroup: true,
+  fullName: group.name,
+  profilePic: group.avatar,
+  bio: group.description,
+});
+
+// where the messages of a chat are read from and sent to
+const messagesUrl = (chat) => (chat.isGroup ? `/api/groups/${chat._id}/messages` : `/api/messages/${chat._id}`);
+const sendUrl = (chat) => (chat.isGroup ? `/api/groups/${chat._id}/messages` : `/api/messages/send/${chat._id}`);
+const searchUrl = (chat) => (chat.isGroup ? `/api/groups/${chat._id}/search` : `/api/messages/search/${chat._id}`);
+
+const withoutKey = (object, key) => {
+  if (!(key in object)) return object;
+  const next = { ...object };
+  delete next[key];
+  return next;
+};
 
 export const ChatProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
@@ -25,92 +48,103 @@ export const ChatProvider = ({ children }) => {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [users, setUsers] = useState([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [unseenMessages, setUnseenMessages] = useState({});
-  const [lastMessages, setLastMessages] = useState({});
-  const [typingUsers, setTypingUsers] = useState({}); // ids of people typing to me right now
+  const [groups, setGroups] = useState([]);
+  const [isLoadingChats, setIsLoadingChats] = useState(true);
+  const [selectedId, setSelectedId] = useState(null);
+  const [unseenMessages, setUnseenMessages] = useState({}); // chat id -> unread count
+  const [lastMessages, setLastMessages] = useState({}); // chat id -> preview of the newest message
+  const [typing, setTyping] = useState({}); // chat id -> { user id: true } of who is typing there
+  const [jumpTarget, setJumpTarget] = useState(null); // { id } of a message the chat should scroll to
 
-  const { socket, axios, authUser, onlineUsers } = useContext(AuthContext);
-
-  // always the id of the open chat, so slow responses for another chat are dropped
-  const selectedIdRef = useRef(null);
-  selectedIdRef.current = selectedUser?._id || null;
-
-  // the latest list of people, readable inside socket handlers without re-subscribing
-  const usersRef = useRef(users);
-  usersRef.current = users;
-
-  // per person, the timer that clears "typing" if their stop signal never arrives
-  const typingTimers = useRef({});
-
+  const { socket, axios, authUser, onlineUsers, saveChatPrefs } = useContext(AuthContext);
   const authUserId = authUser?._id;
 
-  //function to get all users for Sidebar
-  const getUsers = useCallback(async () => {
+  // people and groups together, the open one is looked up here so it always shows fresh data
+  const chats = useMemo(() => [...users, ...groups], [users, groups]);
+  const selectedChat = useMemo(() => chats.find((chat) => chat._id === selectedId) || null, [chats, selectedId]);
+
+  // latest values, readable inside socket handlers and slow requests without re-subscribing
+  const selectedIdRef = useRef(null);
+  selectedIdRef.current = selectedChat?._id || null;
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  const authUserRef = useRef(authUser);
+  authUserRef.current = authUser;
+
+  // "<chat id>:<user id>" -> timer that clears "typing" if the stop signal never arrives
+  const typingTimers = useRef({});
+
+  const showError = (error) => {
+    if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+  };
+
+  //function to get all people and groups for the Sidebar
+  const loadChats = useCallback(async () => {
     try {
-      const { data } = await axios.get("/api/messages/users");
-      setUsers(Array.isArray(data.users) ? data.users : []);
-      setLastMessages(data.lastMessages || {});
+      const [people, mine] = await Promise.all([axios.get("/api/messages/users"), axios.get("/api/groups")]);
+      setUsers(Array.isArray(people.data.users) ? people.data.users : []);
+      setGroups((mine.data.groups || []).map(toGroupChat));
+      setLastMessages({ ...people.data.lastMessages, ...mine.data.lastMessages });
       // the open chat is being read right now, it never shows a count
-      const unseen = { ...(data.unseenMessages || {}) };
-      delete unseen[selectedIdRef.current];
-      setUnseenMessages(unseen);
+      setUnseenMessages(withoutKey({ ...people.data.unseenMessages, ...mine.data.unseenMessages }, selectedIdRef.current));
     } catch (error) {
-      if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+      showError(error);
     } finally {
-      setIsLoadingUsers(false);
+      setIsLoadingChats(false);
     }
   }, [axios]);
 
   // load the list on login, forget everything on logout
   useEffect(() => {
     if (authUserId) {
-      getUsers();
+      loadChats();
       return;
     }
     setUsers([]);
-    setIsLoadingUsers(true);
+    setGroups([]);
+    setIsLoadingChats(true);
     setMessages([]);
     setHasMore(false);
-    setSelectedUser(null);
+    setSelectedId(null);
     setUnseenMessages({});
     setLastMessages({});
-    setTypingUsers({});
-  }, [authUserId, getUsers]);
+    setTyping({});
+  }, [authUserId, loadChats]);
 
   // somebody who signed up after the list was loaded came online
   useEffect(() => {
-    if (!authUserId || isLoadingUsers) return;
+    if (!authUserId || isLoadingChats) return;
     const known = new Set(users.map((user) => user._id));
     const hasNewUser = onlineUsers.some((id) => id !== authUserId && !known.has(id));
-    if (hasNewUser) getUsers();
-  }, [onlineUsers, users, authUserId, isLoadingUsers, getUsers]);
+    if (hasNewUser) loadChats();
+  }, [onlineUsers, users, authUserId, isLoadingChats, loadChats]);
 
   // open a chat (or close it with null)
-  const selectUser = useCallback((user) => {
-    setSelectedUser(user);
-    if (user) setUnseenMessages((prev) => ({ ...prev, [user._id]: 0 }));
+  const selectChat = useCallback((chat) => {
+    setSelectedId(chat?._id || null);
+    if (chat) setUnseenMessages((prev) => withoutKey(prev, chat._id));
   }, []);
 
-  //function to get the newest messages for selected user
-  const selectedId = selectedUser?._id;
+  //function to get the newest messages of the open chat
+  const openChatId = selectedChat?._id;
   useEffect(() => {
     setMessages([]);
     setHasMore(false);
-    if (!selectedId) return;
+    setJumpTarget(null);
+    const chat = chatsRef.current.find((item) => item._id === openChatId);
+    if (!chat) return;
 
     let cancelled = false;
     setIsLoadingMessages(true);
     axios
-      .get(`/api/messages/${selectedId}`)
+      .get(messagesUrl(chat))
       .then(({ data }) => {
         if (cancelled) return;
         setMessages(data.messages);
         setHasMore(Boolean(data.hasMore));
       })
       .catch((error) => {
-        if (!cancelled && error.response?.status !== 401) toast.error(getErrorMessage(error));
+        if (!cancelled) showError(error);
       })
       .finally(() => {
         if (!cancelled) setIsLoadingMessages(false);
@@ -119,46 +153,46 @@ export const ChatProvider = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, axios]);
+  }, [openChatId, axios]);
 
   //function to load the page of messages before the oldest one on screen
   const loadOlderMessages = async () => {
-    const chatId = selectedIdRef.current;
-    if (!chatId || !hasMore || isLoadingOlder || messages.length === 0) return;
+    const chat = selectedChat;
+    if (!chat || !hasMore || isLoadingOlder || messages.length === 0) return;
 
     setIsLoadingOlder(true);
     try {
-      const { data } = await axios.get(`/api/messages/${chatId}`, {
-        params: { before: messages[0].createdAt },
-      });
-      if (selectedIdRef.current !== chatId) return;
+      const { data } = await axios.get(messagesUrl(chat), { params: { before: messages[0].createdAt } });
+      if (selectedIdRef.current !== chat._id) return;
       setMessages((prev) => {
         const known = new Set(prev.map((message) => message._id));
         return [...data.messages.filter((message) => !known.has(message._id)), ...prev];
       });
       setHasMore(Boolean(data.hasMore));
     } catch (error) {
-      if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+      showError(error);
     } finally {
       setIsLoadingOlder(false);
     }
   };
 
-  //function to send message to selected user. Resolves to true on success
+  //function to send a message to the open chat. Resolves to true on success
   const sendMessage = async (messageData) => {
-    const chatId = selectedIdRef.current;
-    if (!chatId) return false;
+    const chat = selectedChat;
+    if (!chat) return false;
     try {
-      const { data } = await axios.post(`/api/messages/send/${chatId}`, messageData);
+      const { data } = await axios.post(sendUrl(chat), messageData);
       const { newMessage } = data;
-      setLastMessages((prev) => ({ ...prev, [chatId]: toPreview(newMessage) }));
+      setLastMessages((prev) => ({ ...prev, [chat._id]: toPreview(newMessage) }));
       // the user may have opened another chat while the request was running
-      if (selectedIdRef.current === chatId) {
-        setMessages((prevMessages) => [...prevMessages, newMessage]);
+      if (selectedIdRef.current === chat._id) {
+        setMessages((prevMessages) =>
+          prevMessages.some((message) => message._id === newMessage._id) ? prevMessages : [...prevMessages, newMessage]
+        );
       }
       return true;
     } catch (error) {
-      if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+      showError(error);
       return false;
     }
   };
@@ -176,8 +210,8 @@ export const ChatProvider = ({ children }) => {
         return message;
       })
     );
-    const otherId = updated.senderId === authUserId ? updated.receiverId : updated.senderId;
-    setLastMessages((prev) => (prev[otherId]?._id === updated._id ? { ...prev, [otherId]: toPreview(updated) } : prev));
+    const chatId = updated.groupId || (updated.senderId === authUserId ? updated.receiverId : updated.senderId);
+    setLastMessages((prev) => (prev[chatId]?._id === updated._id ? { ...prev, [chatId]: toPreview(updated) } : prev));
   }, [authUserId]);
 
   // runs one of the message actions and shows the result. Resolves to true on success
@@ -187,7 +221,7 @@ export const ChatProvider = ({ children }) => {
       applyMessageUpdate(data.message);
       return true;
     } catch (error) {
-      if (error.response?.status !== 401) toast.error(getErrorMessage(error));
+      showError(error);
       return false;
     }
   };
@@ -198,27 +232,108 @@ export const ChatProvider = ({ children }) => {
   const reactToMessage = (messageId, emoji) =>
     runMessageAction(() => axios.put(`/api/messages/${messageId}/reaction`, { emoji }));
 
-  //subscribe to incoming messages
+  // ---------- search inside the open chat ----------
+
+  // resolves to the matching messages, newest first
+  const searchMessages = async (query) => {
+    if (!selectedChat) return [];
+    const { data } = await axios.get(searchUrl(selectedChat), { params: { q: query } });
+    return data.results;
+  };
+
+  // Scrolls the chat to a message. When it is older than what is loaded,
+  // everything from that message until now is loaded first
+  const openAtMessage = async (message) => {
+    const chat = selectedChat;
+    if (!chat) return;
+    if (!messages.some((item) => item._id === message._id)) {
+      try {
+        const { data } = await axios.get(messagesUrl(chat), { params: { since: message.createdAt } });
+        if (selectedIdRef.current !== chat._id) return;
+        setMessages(data.messages);
+        setHasMore(Boolean(data.hasMore));
+      } catch (error) {
+        showError(error);
+        return;
+      }
+    }
+    setJumpTarget({ id: message._id });
+  };
+
+  // ---------- groups ----------
+
+  const upsertGroup = useCallback((group) => {
+    const chat = toGroupChat(group);
+    setGroups((prev) => (prev.some((item) => item._id === chat._id) ? prev.map((item) => (item._id === chat._id ? chat : item)) : [...prev, chat]));
+  }, []);
+
+  const forgetGroup = useCallback((groupId) => {
+    setGroups((prev) => prev.filter((group) => group._id !== groupId));
+    setLastMessages((prev) => withoutKey(prev, groupId));
+    setUnseenMessages((prev) => withoutKey(prev, groupId));
+    setSelectedId((current) => (current === groupId ? null : current));
+  }, []);
+
+  // runs a group request, stores the group it answers with. Resolves to that group, or false on failure
+  const runGroupAction = async (request, successText) => {
+    try {
+      const { data } = await request();
+      if (data.group) upsertGroup(data.group);
+      if (successText) toast.success(successText);
+      return data.group || true;
+    } catch (error) {
+      showError(error);
+      return false;
+    }
+  };
+
+  const createGroup = async (body) => {
+    const group = await runGroupAction(() => axios.post("/api/groups", body), "Group created");
+    if (group?._id) setSelectedId(group._id);
+    return Boolean(group);
+  };
+  const updateGroup = (groupId, body) => runGroupAction(() => axios.put(`/api/groups/${groupId}`, body), "Group updated");
+  const addGroupMembers = (groupId, userIds) => runGroupAction(() => axios.post(`/api/groups/${groupId}/members`, { userIds }), "Added to the group");
+  const setGroupMemberRole = (groupId, userId, role) => runGroupAction(() => axios.put(`/api/groups/${groupId}/members/${userId}`, { role }));
+  // removing yourself is leaving the group
+  const removeGroupMember = async (groupId, userId) => {
+    const done = await runGroupAction(() => axios.delete(`/api/groups/${groupId}/members/${userId}`));
+    if (done && userId === authUserId) forgetGroup(groupId);
+    return Boolean(done);
+  };
+
+  // ---------- pin, mute, archive ----------
+
+  const pinnedIds = authUser?.pinnedChats;
+  const mutedIds = authUser?.mutedChats;
+  const archivedIds = authUser?.archivedChats;
+  const chatPrefs = useMemo(() => ({
+    pinned: new Set(pinnedIds),
+    muted: new Set(mutedIds),
+    archived: new Set(archivedIds),
+  }), [pinnedIds, mutedIds, archivedIds]);
+
+  // patch is any of { pinned, muted, archived } as true or false
+  const setChatPref = (chatId, patch) => saveChatPrefs({ chatId, ...patch });
+
+  //subscribe to everything the server pushes
   useEffect(() => {
     if (!socket) return;
 
-    const setTyping = (userId, isTyping) => {
-      clearTimeout(typingTimers.current[userId]);
-      if (isTyping) {
-        typingTimers.current[userId] = setTimeout(() => setTyping(userId, false), TYPING_TIMEOUT_MS);
-      }
-      setTypingUsers((prev) => {
-        if (Boolean(prev[userId]) === isTyping) return prev;
-        const next = { ...prev };
-        if (isTyping) next[userId] = true;
-        else delete next[userId];
-        return next;
+    const markTyping = (chatId, userId, isTyping) => {
+      const key = `${chatId}:${userId}`;
+      clearTimeout(typingTimers.current[key]);
+      if (isTyping) typingTimers.current[key] = setTimeout(() => markTyping(chatId, userId, false), TYPING_TIMEOUT_MS);
+      setTyping((prev) => {
+        if (Boolean(prev[chatId]?.[userId]) === isTyping) return prev;
+        const inChat = isTyping ? { ...prev[chatId], [userId]: true } : withoutKey(prev[chatId] || {}, userId);
+        return Object.keys(inChat).length > 0 ? { ...prev, [chatId]: inChat } : withoutKey(prev, chatId);
       });
     };
 
-    const handleTyping = ({ from, isTyping }) => setTyping(from, isTyping);
+    const handleTyping = ({ from, groupId, isTyping }) => markTyping(groupId || from, from, isTyping);
 
-    // the other person read what I sent them
+    // the other person read what I sent them (one-to-one chats)
     const handleMessagesSeen = ({ by }) => {
       setLastMessages((prev) =>
         prev[by] && prev[by].senderId !== by && !prev[by].seen ? { ...prev, [by]: { ...prev[by], seen: true } } : prev
@@ -230,77 +345,105 @@ export const ChatProvider = ({ children }) => {
       }
     };
 
-    const handleNewMessage = (newMessage) => {
-      const { senderId } = newMessage;
-      setTyping(senderId, false);
-      setLastMessages((prev) => ({ ...prev, [senderId]: toPreview(newMessage) }));
+    // a group member read up to a moment, the ticks of the group are worked out from these
+    const handleGroupRead = ({ groupId, userId, lastReadAt }) => {
+      setGroups((prev) =>
+        prev.map((group) =>
+          group._id !== groupId ? group : {
+            ...group,
+            members: group.members.map((member) => (member.user._id === userId ? { ...member, lastReadAt } : member)),
+          }
+        )
+      );
+    };
 
-      // sound and a system notification, unless the user is looking at this very chat
-      const isBeingRead = selectedIdRef.current === senderId && !document.hidden;
-      if (!isBeingRead && isNotifyEnabled()) {
-        const sender = usersRef.current.find((user) => user._id === senderId);
+    const handleNewMessage = (newMessage) => {
+      const me = authUserRef.current;
+      const chatId = newMessage.groupId || newMessage.senderId;
+      const chat = chatsRef.current.find((item) => item._id === chatId);
+      const isMine = newMessage.senderId === me?._id; // only the server's own lines in a group come back to me
+      const isOpen = selectedIdRef.current === chatId;
+      const countsAsUnread = !isMine && !newMessage.system;
+
+      // a group I was just added to and do not know yet
+      if (!chat && newMessage.groupId) loadChats();
+
+      markTyping(chatId, newMessage.senderId, false);
+      setLastMessages((prev) => ({ ...prev, [chatId]: toPreview(newMessage) }));
+
+      // sound and a system notification, unless muted or the user is looking at this very chat
+      const isMuted = me?.mutedChats?.includes(chatId);
+      if (countsAsUnread && !isMuted && isNotifyEnabled() && !(isOpen && !document.hidden)) {
+        const sender = chatsRef.current.find((item) => item._id === newMessage.senderId);
+        const senderName = sender?.fullName || "New message";
         playMessageSound();
         showNotification({
-          title: sender?.fullName || "New message",
+          title: chat?.isGroup ? `${senderName.split(" ")[0]} in ${chat.fullName}` : senderName,
           body: newMessage.text || "Sent a photo",
-          icon: sender?.profilePic,
-          tag: senderId,
-          onClick: () => sender && selectUser(sender),
+          icon: (chat?.isGroup ? chat : sender)?.profilePic,
+          tag: chatId,
+          onClick: () => chat && selectChat(chat),
         });
       }
 
-      if (selectedIdRef.current === senderId) {
+      if (isOpen) {
         setMessages((prevMessages) =>
           prevMessages.some((message) => message._id === newMessage._id)
             ? prevMessages
-            : [...prevMessages, { ...newMessage, seen: true }]
+            : [...prevMessages, newMessage.groupId ? newMessage : { ...newMessage, seen: true }]
         );
-        axios.put(`/api/messages/mark/${newMessage._id}`).catch(() => {});
-      } else {
-        setUnseenMessages((prevUnseenMessages) => ({
-          ...prevUnseenMessages,
-          [senderId]: (prevUnseenMessages[senderId] || 0) + 1,
-        }));
+        if (countsAsUnread) {
+          const markRead = newMessage.groupId ? `/api/groups/${chatId}/read` : `/api/messages/mark/${newMessage._id}`;
+          axios.put(markRead).catch(() => {});
+        }
+      } else if (countsAsUnread) {
+        setUnseenMessages((prev) => ({ ...prev, [chatId]: (prev[chatId] || 0) + 1 }));
       }
     };
 
     // somebody went offline
     const handleLastSeen = ({ userId, lastSeen }) => {
       setUsers((prev) => prev.map((user) => (user._id === userId ? { ...user, lastSeen } : user)));
-      setSelectedUser((prev) => (prev?._id === userId ? { ...prev, lastSeen } : prev));
     };
 
+    const handleGroupRemoved = ({ groupId }) => forgetGroup(groupId);
+
+    const handlers = {
+      newMessage: handleNewMessage,
+      messageUpdated: applyMessageUpdate,
+      messagesSeen: handleMessagesSeen,
+      typing: handleTyping,
+      lastSeen: handleLastSeen,
+      groupUpdated: upsertGroup,
+      groupRead: handleGroupRead,
+      groupRemoved: handleGroupRemoved,
+    };
     const timers = typingTimers.current;
-    socket.on("messageUpdated", applyMessageUpdate);
-    socket.on("lastSeen", handleLastSeen);
-    socket.on("newMessage", handleNewMessage);
-    socket.on("typing", handleTyping);
-    socket.on("messagesSeen", handleMessagesSeen);
+    Object.entries(handlers).forEach(([event, handler]) => socket.on(event, handler));
     return () => {
-      socket.off("messageUpdated", applyMessageUpdate);
-      socket.off("lastSeen", handleLastSeen);
-      socket.off("newMessage", handleNewMessage);
-      socket.off("typing", handleTyping);
-      socket.off("messagesSeen", handleMessagesSeen);
+      Object.entries(handlers).forEach(([event, handler]) => socket.off(event, handler));
       Object.values(timers).forEach(clearTimeout);
     };
-  }, [socket, axios, applyMessageUpdate, selectUser]);
+  }, [socket, axios, applyMessageUpdate, selectChat, loadChats, upsertGroup, forgetGroup]);
 
-  // tell a person that I started or stopped typing to them
-  const sendTyping = useCallback((userId, isTyping) => {
-    if (socket && userId) socket.emit("typing", { to: userId, isTyping });
+  // tell the other side of a chat that I started or stopped typing
+  const sendTyping = useCallback((chat, isTyping) => {
+    if (socket && chat) socket.emit("typing", { to: chat._id, isGroup: Boolean(chat.isGroup), isTyping });
   }, [socket]);
 
   // after a dropped connection comes back, catch up on what was missed
   useEffect(() => {
     if (!socket) return;
-    const handleReconnect = () => getUsers();
+    const handleReconnect = () => loadChats();
     socket.io.on("reconnect", handleReconnect);
     return () => socket.io.off("reconnect", handleReconnect);
-  }, [socket, getUsers]);
+  }, [socket, loadChats]);
 
-  // unread count in the browser tab
-  const totalUnseen = Object.values(unseenMessages).reduce((sum, count) => sum + count, 0);
+  // unread count in the browser tab, muted chats stay quiet here too
+  const totalUnseen = Object.entries(unseenMessages).reduce(
+    (sum, [chatId, count]) => (chatPrefs.muted.has(chatId) ? sum : sum + count),
+    0
+  );
   useEffect(() => {
     document.title = totalUnseen > 0 ? `(${totalUnseen}) ${APP_NAME}` : APP_NAME;
   }, [totalUnseen]);
@@ -311,18 +454,30 @@ export const ChatProvider = ({ children }) => {
     isLoadingMessages,
     isLoadingOlder,
     users,
-    isLoadingUsers,
-    selectedUser,
-    selectUser,
+    groups,
+    chats,
+    isLoadingChats,
+    selectedChat,
+    selectChat,
     loadOlderMessages,
     sendMessage,
     editMessage,
     deleteMessage,
     reactToMessage,
+    searchMessages,
+    openAtMessage,
+    jumpTarget,
     sendTyping,
-    typingUsers,
+    typing,
     unseenMessages,
     lastMessages,
+    createGroup,
+    updateGroup,
+    addGroupMembers,
+    removeGroupMember,
+    setGroupMemberRole,
+    chatPrefs,
+    setChatPref,
   };
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 };

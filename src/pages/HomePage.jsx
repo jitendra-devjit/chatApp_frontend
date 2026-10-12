@@ -11,7 +11,7 @@ const isWideScreen = () => window.matchMedia('(min-width: 80rem)').matches;
 
 const HomePage = () => {
 
-    const {selectedUser} = useContext(ChatContext);
+    const {selectedChat} = useContext(ChatContext);
 
     // the details column starts open only where there is room for it
     const [isDetailsOpen, setIsDetailsOpen] = useState(isWideScreen);
@@ -20,7 +20,7 @@ const HomePage = () => {
     const closeDetails = useCallback(() => setIsDetailsOpen(false), []);
     const closeLightbox = useCallback(() => setLightbox(null), []);
 
-    const showDetails = Boolean(selectedUser) && isDetailsOpen;
+    const showDetails = Boolean(selectedChat) && isDetailsOpen;
 
     return (
     <main className='h-dvh flex md:gap-3 md:p-3'>

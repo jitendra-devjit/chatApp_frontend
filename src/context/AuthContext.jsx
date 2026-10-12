@@ -122,6 +122,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Pin, mute or archive a chat. The settings live on the user. Resolves to true on success
+  const saveChatPrefs = async (body) => {
+    try {
+      const { data } = await api.put("/api/auth/chat-prefs", body);
+      setAuthUser(data.user);
+      return true;
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      return false;
+    }
+  };
+
   // One socket per logged in user, authenticated with the same token as the API
   const userId = authUser?._id;
   useEffect(() => {
@@ -146,6 +158,7 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     updateProfile,
+    saveChatPrefs,
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

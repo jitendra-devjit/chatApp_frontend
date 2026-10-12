@@ -94,6 +94,13 @@ export function getAvatarGradient(name = ""){
     return `linear-gradient(135deg, hsl(${hue} 78% 62%), hsl(${(hue + 48) % 360} 74% 48%))`;
 }
 
+// colour of a person's name above their messages in a group, readable in both modes
+export function getNameColor(name = ""){
+    let hash = 0;
+    for (const char of name) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+    return `hsl(${hash % 360} 72% 58%)`;
+}
+
 export function formatJoined(date){
     if (!date) return "";
     return new Date(date).toLocaleDateString([], { month: "long", year: "numeric" });
