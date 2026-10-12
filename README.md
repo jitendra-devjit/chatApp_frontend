@@ -23,7 +23,8 @@ This is the frontend. The API and realtime server live in [chatApp_backend](http
 - Search inside a chat (`Ctrl + F`) and jump to any old message
 - Pin, mute and archive chats, filter the list by unread or groups
 - Last seen, message sound and browser notifications
-- Photo sharing with preview before sending, paste from clipboard and a full screen viewer
+- Photos, videos and documents: several at once, with drag and drop, paste, upload progress and a gallery viewer
+- Voice notes recorded in the browser, with a waveform player and playback speed
 - Live online status, unread counts in the sidebar and in the browser tab
 - Conversations sorted by latest message, with a preview of the last one
 - Profile page with photo preview before saving, view, change and remove

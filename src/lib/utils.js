@@ -106,6 +106,29 @@ export function formatJoined(date){
     return new Date(date).toLocaleDateString([], { month: "long", year: "numeric" });
 }
 
+// How files are named where there is no room to show them (chat list, quotes).
+// Takes the kind and name of the first file and how many there are
+export function describeAttachment({ type, name, count = 1 }){
+    if (type === "image") return { type, label: count > 1 ? `${count} photos` : "Photo" };
+    if (count > 1) return { type, label: `${count} files` };
+    if (type === "video") return { type, label: "Video" };
+    if (type === "audio") return { type, label: name || "Voice message" };
+    return { type, label: name || "Document" };
+}
+
+// The same for a whole message, plus a small picture when it has one. null for a message without files
+export function describeAttachments(message){
+    const files = message?.attachments || [];
+    if (files.length === 0) {
+        return message?.image ? { type: "image", label: "Photo", thumbnail: message.image } : null;
+    }
+    const [first] = files;
+    return {
+        ...describeAttachment({ type: first.type, name: first.name, count: files.length }),
+        thumbnail: first.type === "image" ? first.url : null,
+    };
+}
+
 // returns an error text when the file cannot be sent, otherwise null
 export function validateImageFile(file){
     if (!file || !IMAGE_TYPES.includes(file.type)) return "Choose a PNG, JPG, WEBP or GIF image";

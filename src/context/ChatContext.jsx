@@ -13,6 +13,10 @@ const toPreview = (message) => ({
   _id: message._id,
   text: message.text || "",
   hasImage: Boolean(message.image),
+  // kind and name of the first file, and how many there are
+  attachment: message.attachments?.length
+    ? { type: message.attachments[0].type, name: message.attachments[0].name, count: message.attachments.length }
+    : undefined,
   deleted: Boolean(message.deletedAt),
   system: Boolean(message.system),
   senderId: message.senderId,
@@ -204,8 +208,8 @@ export const ChatProvider = ({ children }) => {
         if (message._id === updated._id) return { ...updated, seen: message.seen || updated.seen };
         // replies quote it, their copy changes too
         if (message.replyTo?._id === updated._id) {
-          const { _id, text, image, senderId, deletedAt } = updated;
-          return { ...message, replyTo: { _id, text, image, senderId, deletedAt } };
+          const { _id, text, image, attachments, senderId, deletedAt } = updated;
+          return { ...message, replyTo: { _id, text, image, attachments, senderId, deletedAt } };
         }
         return message;
       })

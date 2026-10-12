@@ -1,12 +1,15 @@
 import React from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowBendUpLeft, Check, Checks, Copy, DotsThree, Image as ImageIcon, PencilSimple, Prohibit, Smiley, Trash } from '@phosphor-icons/react'
+import { ArrowBendUpLeft, Check, Checks, Copy, DotsThree, Image as ImageIcon, Microphone, Paperclip, PencilSimple, Prohibit, Smiley, Trash, VideoCamera } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
-import { EDIT_WINDOW_MS, formatMessageTime, getNameColor, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
+import { describeAttachments, EDIT_WINDOW_MS, formatMessageTime, getNameColor, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
+import { FileCard, MediaGrid, VoicePlayer } from './Attachments'
 import Avatar from './Avatar'
 
 const bubbleSpring = { type: 'spring', stiffness: 520, damping: 34, mass: 0.8 };
 const popSpring = { type: 'spring', stiffness: 560, damping: 30 };
+
+const ATTACHMENT_ICONS = { image: ImageIcon, video: VideoCamera, audio: Microphone, file: Paperclip };
 
 const actionClass = 'grid place-items-center w-8 h-8 rounded-full text-muted transition-colors hover:bg-hover hover:text-ink'
 const menuItemClass = 'flex items-center gap-2.5 w-full h-9 px-3 rounded-xl text-sm font-semibold text-left transition-colors hover:bg-hover'
@@ -34,7 +37,16 @@ const MessageBubble = ({
   onReply, onEdit, onDelete, onReact, onOpenImage, onJumpTo, onImageLoad,
 }) => {
   const isDeleted = Boolean(msg.deletedAt);
-  const emojiOnly = !isDeleted && !msg.image && !msg.replyTo && isEmojiOnly(msg.text);
+  // the files of the message by how they are shown. A picture sent the old way counts as a photo
+  const attachments = isDeleted ? [] : msg.attachments || [];
+  const media = [
+    ...(msg.image && !isDeleted ? [{ type: 'image', url: msg.image }] : []),
+    ...attachments.filter((file) => file.type === 'image' || file.type === 'video'),
+  ];
+  const sounds = attachments.filter((file) => file.type === 'audio');
+  const documents = attachments.filter((file) => file.type === 'file');
+  const hasFiles = media.length + sounds.length + documents.length > 0;
+  const emojiOnly = !isDeleted && !hasFiles && !msg.replyTo && isEmojiOnly(msg.text);
   const canEdit = isOwn && !isDeleted && Boolean(msg.text) && Date.now() - new Date(msg.createdAt).getTime() < EDIT_WINDOW_MS;
   const menu = openMenu?.id === msg._id ? openMenu : null;
   const reactions = groupReactions(msg.reactions, myId);
@@ -74,6 +86,8 @@ const MessageBubble = ({
   const popoverOrigin = `${menu?.below ? 'origin-top' : 'origin-bottom'}${isOwn ? '-right' : '-left'}`;
 
   const replyAuthor = msg.replyTo && (msg.replyTo.senderId === myId ? 'You' : getName(msg.replyTo.senderId));
+  const quoted = msg.replyTo && !msg.replyTo.deletedAt ? describeAttachments(msg.replyTo) : null;
+  const QuotedIcon = quoted && ATTACHMENT_ICONS[quoted.type];
   // other people's messages in a group leave room on the left for the sender's picture
   const indent = sender ? 'ml-9' : '';
 
@@ -93,14 +107,12 @@ const MessageBubble = ({
           <div className='w-7 shrink-0 self-end mr-1'>{isGroupEnd && <Avatar user={sender} size='xs' />}</div>
         )}
         <div onClick={handleBubbleTap}
-          className={`flex flex-col min-w-0 max-w-[80%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''}`}>
-          {msg.image && !isDeleted && (
-            <button type='button' onClick={(e) => { e.stopPropagation(); onOpenImage(msg.image) }} aria-label='Open image'
-              className={`block overflow-hidden rounded-[22px] ${corners} border border-line bg-raised`}>
-              <img src={msg.image} alt="Shared image" onLoad={onImageLoad}
-                className='block max-w-full max-h-80 min-h-24 min-w-24 object-cover transition-transform duration-300 hover:scale-[1.03]' />
-            </button>
+          className={`flex flex-col gap-[3px] min-w-0 max-w-[80%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''}`}>
+          {media.length > 0 && (
+            <MediaGrid items={media} corners={corners} onLoad={onImageLoad} onOpen={(index) => onOpenImage(media, index)} />
           )}
+          {sounds.map((file) => <VoicePlayer key={file.url} attachment={file} isOwn={isOwn} corners={corners} />)}
+          {documents.map((file) => <FileCard key={file.url} attachment={file} isOwn={isOwn} corners={corners} />)}
 
           {isDeleted ? (
             <p data-deleted className={`flex items-center gap-2 px-4 py-2.5 rounded-[22px] ${corners} border border-dashed border-line-strong text-sm italic text-muted`}>
@@ -109,7 +121,7 @@ const MessageBubble = ({
           ) : emojiOnly ? (
             <p data-emoji-only className='text-[46px] leading-tight py-1'>{msg.text}</p>
           ) : (msg.text || msg.replyTo) && (
-            <div data-bubble className={`px-4 py-2.5 rounded-[22px] ${corners} text-[15px] leading-[1.4] ${msg.image ? 'mt-[3px]' : ''}
+            <div data-bubble className={`px-4 py-2.5 rounded-[22px] ${corners} text-[15px] leading-[1.4]
               ${isOwn ? 'grad text-white shadow-lg shadow-[color-mix(in_oklab,var(--a2)_35%,transparent)]' : 'bg-bubble text-ink border border-line'}`}>
               {msg.replyTo && (
                 <button type='button' data-quote onClick={(e) => { e.stopPropagation(); onJumpTo(msg.replyTo._id) }}
@@ -119,13 +131,11 @@ const MessageBubble = ({
                     <span className={`block font-bold ${isOwn ? 'text-white' : 'text-accent-text'}`}>{replyAuthor}</span>
                     <span className={`block truncate ${isOwn ? 'text-white/85' : 'text-muted'}`}>
                       {msg.replyTo.deletedAt ? 'Deleted message' : (
-                        <>{msg.replyTo.image && <ImageIcon size={13} weight='fill' className='inline -mt-0.5 mr-1' />}{msg.replyTo.text || 'Photo'}</>
+                        <>{QuotedIcon && <QuotedIcon size={13} weight='fill' className='inline -mt-0.5 mr-1' />}{msg.replyTo.text || quoted?.label || 'Message'}</>
                       )}
                     </span>
                   </span>
-                  {msg.replyTo.image && !msg.replyTo.deletedAt && (
-                    <img src={msg.replyTo.image} alt="" className='w-9 h-9 shrink-0 rounded-lg object-cover' />
-                  )}
+                  {quoted?.thumbnail && <img src={quoted.thumbnail} alt="" className='w-9 h-9 shrink-0 rounded-lg object-cover' />}
                 </button>
               )}
               {msg.text && <p className='whitespace-pre-wrap [overflow-wrap:anywhere]'>{msg.text}</p>}

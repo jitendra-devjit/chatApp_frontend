@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDown, ArrowLeft, CircleNotch, Info, Lightning, MagnifyingGlass, Trash } from '@phosphor-icons/react'
+import { ArrowDown, ArrowLeft, CircleNotch, CloudArrowUp, Info, Lightning, MagnifyingGlass, Trash } from '@phosphor-icons/react'
 import { formatDayLabel, formatLastSeen, isSameDay } from '../lib/utils'
 import { AuthContext } from '../context/AuthContext';
 import { ChatContext } from '../context/ChatContext';
@@ -72,7 +72,11 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const [openMenu, setOpenMenu] = useState(null); // { id, type, below } of the open message popover
   const [highlightId, setHighlightId] = useState(null); // message the user jumped to
   const [isSearching, setIsSearching] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const scrollRef = useRef(null);
+  const composerRef = useRef(null);
+  // drag events fire for every element the pointer crosses, this counts in and out
+  const dragDepth = useRef(0);
   // what the list looked like after the previous render, to decide how to scroll now
   const snapshot = useRef({ chatId: null, firstId: null, lastId: null, height: 0 });
 
@@ -182,6 +186,27 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     if (isAtBottom) scrollToBottom();
   };
 
+  // ---------- files dragged onto the chat ----------
+  const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  const handleDragEnter = (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDraggingFiles(true);
+  };
+  const handleDragLeave = (e) => {
+    if (!carriesFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDraggingFiles(false);
+  };
+  const handleDrop = (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDraggingFiles(false);
+    composerRef.current?.addFiles([...e.dataTransfer.files]);
+  };
+
   if (!selectedChat) return <EmptyState />;
 
   const isOnline = !isGroup && onlineUsers.includes(selectedId);
@@ -249,7 +274,23 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   };
 
   return (
-    <section className='glass relative flex-1 flex flex-col min-h-0 min-w-0 md:rounded-[28px] overflow-hidden max-md:border-0'>
+    <section onDragEnter={handleDragEnter} onDragOver={(e) => carriesFiles(e) && e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
+      className='glass relative flex-1 flex flex-col min-h-0 min-w-0 md:rounded-[28px] overflow-hidden max-md:border-0'>
+      <AnimatePresence>
+        {isDraggingFiles && (
+          <motion.div key='drop' data-drop-zone initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className='pointer-events-none absolute inset-2 z-40 grid place-items-center rounded-[22px] border-2 border-dashed border-accent-text bg-[color-mix(in_oklab,var(--canvas)_82%,transparent)] backdrop-blur-sm'>
+            <div className='text-center'>
+              <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                className='grid place-items-center w-20 h-20 mx-auto rounded-full grad glow text-white'>
+                <CloudArrowUp size={38} weight='fill' />
+              </motion.div>
+              <p className='mt-5 text-xl font-extrabold tracking-tight'>Drop to attach</p>
+              <p className='mt-1 text-sm text-muted'>Photos, videos and documents, up to 10 at once</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* ---------------- header ---------------- */}
       <header className='flex items-center gap-1 h-[72px] px-3 sm:px-5 shrink-0 border-b border-line'>
         <IconButton label='Back to conversations' onClick={() => selectChat(null)} className='md:hidden -ml-1'>
@@ -338,7 +379,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                         onEdit={startEdit}
                         onDelete={setDeleteTarget}
                         onReact={(message, emoji) => reactToMessage(message._id, emoji)}
-                        onOpenImage={(src) => onOpenImage({ src, title: isOwn ? 'You' : findUser(msg.senderId)?.fullName })}
+                        onOpenImage={(items, index) => onOpenImage({ items, index, title: isOwn ? 'You' : findUser(msg.senderId)?.fullName })}
                         onJumpTo={jumpToMessage}
                         onImageLoad={handleImageLoad}
                       />
@@ -374,7 +415,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
       </AnimatePresence>
 
       {/* ---------------- bottom area ---------------- */}
-      <MessageComposer key={selectedId} recipientName={isGroup ? selectedChat.fullName : firstName} onSend={handleSend}
+      <MessageComposer key={selectedId} ref={composerRef} recipientName={isGroup ? selectedChat.fullName : firstName} onSend={handleSend}
         onTyping={(isTypingNow) => sendTyping(selectedChat, isTypingNow)}
         replyingTo={replyingTo && { ...replyingTo, authorName: replyingTo.senderId === authUser._id ? 'yourself' : getName(replyingTo.senderId) }}
         editingMessage={editingMessage}

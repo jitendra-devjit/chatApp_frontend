@@ -2,12 +2,12 @@ import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  Archive, ArrowLeft, BellSlash, BellSimple, CaretDown, Check, Checks, Image as ImageIcon, MagnifyingGlass,
-  Prohibit, PushPin, PushPinSlash, SignOut, UsersThree, X,
+  Archive, ArrowLeft, BellSlash, BellSimple, CaretDown, Check, Checks, Image as ImageIcon, MagnifyingGlass, Microphone,
+  Paperclip, Prohibit, PushPin, PushPinSlash, SignOut, UsersThree, VideoCamera, X,
 } from '@phosphor-icons/react';
 import { AuthContext } from '../context/AuthContext';
 import { ChatContext } from '../context/ChatContext';
-import { formatListTime } from '../lib/utils';
+import { describeAttachment, formatListTime } from '../lib/utils';
 import AppearanceMenu from './AppearanceMenu';
 import Avatar from './Avatar';
 import { CreateGroupModal } from './GroupModals';
@@ -17,6 +17,8 @@ import NotificationToggle from './NotificationToggle';
 import TypingDots from './TypingDots';
 
 const TABS = [['all', 'All'], ['unread', 'Unread'], ['groups', 'Groups']];
+
+const ATTACHMENT_ICONS = { image: ImageIcon, video: VideoCamera, audio: Microphone, file: Paperclip };
 
 const isTypingTarget = (element) =>
   element instanceof HTMLElement &&
@@ -128,6 +130,9 @@ const Sidebar = () => {
     if (last.deleted) {
       return <span className='italic'><Prohibit size={14} className='inline -mt-0.5 mr-1' />{mine ? 'You deleted this message' : 'This message was deleted'}</span>;
     }
+    // the files of the message: new style attachments, or a picture sent the old way
+    const files = last.attachment ? describeAttachment(last.attachment) : last.hasImage ? { type: 'image', label: 'Photo' } : null;
+    const FileKindIcon = files && ATTACHMENT_ICONS[files.type];
     return (
       <>
         {chat.isGroup
@@ -135,8 +140,8 @@ const Sidebar = () => {
           : mine && (last.seen
             ? <Checks size={16} weight='bold' className='inline -mt-0.5 mr-1 text-accent-text' />
             : <Check size={15} weight='bold' className='inline -mt-0.5 mr-1' />)}
-        {last.hasImage && <ImageIcon size={15} weight='fill' className='inline -mt-0.5 mr-1' />}
-        {last.text || 'Photo'}
+        {FileKindIcon && <FileKindIcon size={15} weight='fill' className='inline -mt-0.5 mr-1' />}
+        {last.text || files?.label || 'Message'}
       </>
     );
   };

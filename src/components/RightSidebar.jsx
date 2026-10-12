@@ -1,12 +1,14 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  Archive, BellSimple, BellSlash, CalendarBlank, Crown, DotsThree, Images, PencilSimple, PushPin, PushPinSlash,
+  Archive, BellSimple, BellSlash, CalendarBlank, Crown, DotsThree, Files, Images, PencilSimple, Play, PushPin, PushPinSlash,
   Quotes, SignOut, UserMinus, UserPlus, UsersThree, X,
 } from '@phosphor-icons/react'
 import { ChatContext } from '../context/ChatContext';
 import { AuthContext } from '../context/AuthContext';
 import { formatJoined, formatLastSeen } from '../lib/utils';
+import { posterUrl, thumbnailUrl } from '../lib/upload';
+import { FileCard } from './Attachments';
 import Avatar from './Avatar';
 import { AddMembersModal, EditGroupModal } from './GroupModals';
 import IconButton from './IconButton';
@@ -47,11 +49,17 @@ const RightSidebar = ({ onClose, onOpenImage }) => {
   const [dialog, setDialog] = useState(null); // 'add' | 'edit' | 'leave' | { remove: member }
   const [memberMenu, setMemberMenu] = useState(null); // id of the member whose menu is open
 
-  //Get all the images from the messages, newest first
-  const msgImages = useMemo(
-    () => messages.filter(msg => msg.image).map(msg => ({ id: msg._id, url: msg.image })).reverse(),
-    [messages]
-  );
+  //Get all the photos, videos and documents from the messages, newest first
+  const { media, documents } = useMemo(() => {
+    const all = messages.filter((msg) => !msg.deletedAt).flatMap((msg) => [
+      ...(msg.image ? [{ type: 'image', url: msg.image }] : []),
+      ...(msg.attachments || []),
+    ]).reverse();
+    return {
+      media: all.filter((file) => file.type === 'image' || file.type === 'video'),
+      documents: all.filter((file) => file.type === 'file'),
+    };
+  }, [messages]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -235,21 +243,36 @@ const RightSidebar = ({ onClose, onOpenImage }) => {
               </Section>
             )}
 
-            <Section icon={<Images size={15} weight='fill' />} title='Shared media' count={msgImages.length}>
-              {msgImages.length === 0 ? (
-                <p className='text-sm text-muted'>Photos sent in this chat will show up here.</p>
+            <Section icon={<Images size={15} weight='fill' />} title='Shared media' count={media.length}>
+              {media.length === 0 ? (
+                <p className='text-sm text-muted'>Photos and videos sent in this chat will show up here.</p>
               ) : (
                 <div className='grid grid-cols-3 gap-1.5'>
-                  {msgImages.map(({ id, url })=>(
-                    <motion.button type='button' key={id} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                      onClick={()=> onOpenImage({ src: url, title: 'Shared media' })} aria-label='Open image'
-                      className='aspect-square overflow-hidden rounded-2xl bg-raised border border-line'>
-                      <img src={url} alt="" loading='lazy' className='w-full h-full object-cover'/>
+                  {media.map((file, index)=>(
+                    <motion.button type='button' key={file.url} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                      onClick={()=> onOpenImage({ items: media, index, title: 'Shared media' })} aria-label={file.type === 'video' ? 'Play video' : 'Open image'}
+                      className='relative aspect-square overflow-hidden rounded-2xl bg-raised border border-line'>
+                      {file.type === 'image'
+                        ? <img src={thumbnailUrl(file.url, 300)} alt="" loading='lazy' className='w-full h-full object-cover'/>
+                        : posterUrl(file.url)
+                          ? <img src={posterUrl(file.url, 300)} alt="" loading='lazy' className='w-full h-full object-cover'/>
+                          : <video src={file.url} preload='metadata' muted className='w-full h-full object-cover bg-black' />}
+                      {file.type === 'video' && (
+                        <span className='absolute inset-0 grid place-items-center bg-black/25 text-white'><Play size={18} weight='fill' /></span>
+                      )}
                     </motion.button>
                   ))}
                 </div>
               )}
             </Section>
+
+            {documents.length > 0 && (
+              <Section icon={<Files size={15} weight='fill' />} title='Documents' count={documents.length}>
+                <div className='flex flex-col gap-1.5 -mx-1'>
+                  {documents.map((file) => <FileCard key={file.url} attachment={file} compact />)}
+                </div>
+              </Section>
+            )}
 
             {isGroup && (
               <button type='button' onClick={() => setDialog('leave')}
