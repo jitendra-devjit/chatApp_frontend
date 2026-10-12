@@ -1,11 +1,221 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
 
 @import "tailwindcss";
 
-*{
-  font-family: 'Outfit', sans-serif;
+/* ---------- design tokens ---------- */
+
+:root {
+  color-scheme: dark;
+  --canvas: #0c0c0d;
+  --surface: #121214;
+  --raised: #1b1b1e;
+  --hover: #222226;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --ink: #ededea;
+  --muted: #9a9a9e;
+  --faint: #636368;
+  --accent: #c8f542;
+  --accent-ink: #11140a;
+  --accent-text: #c8f542;
+  --danger: #ff6b5e;
+  --overlay: rgba(0, 0, 0, 0.72);
+  --grain-opacity: 0.05;
 }
 
-::-webkit-scrollbar{
-  display: none;
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #f3f2ee;
+  --surface: #faf9f6;
+  --raised: #ffffff;
+  --hover: #ecebe6;
+  --line: rgba(20, 20, 18, 0.09);
+  --line-strong: rgba(20, 20, 18, 0.2);
+  --ink: #161615;
+  --muted: #64645f;
+  --faint: #96968f;
+  --accent: #c8f542;
+  --accent-ink: #11140a;
+  --accent-text: #4a6600;
+  --danger: #c8321f;
+  --overlay: rgba(20, 20, 18, 0.55);
+  --grain-opacity: 0.035;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-text: var(--accent-text);
+  --color-danger: var(--danger);
+  --color-overlay: var(--overlay);
+
+  --animate-message-in: message-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 0.18s ease-out;
+  --animate-pop-in: pop-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---------- base ---------- */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* film grain over the whole app, keeps flat colours from looking sterile */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+button,
+[role="button"],
+label[for] {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+/* thin scrollbars that only show their thumb */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- pieces used in several places ---------- */
+
+@utility label-mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* faint dot grid behind the conversation */
+@utility dot-grid {
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* placeholder block while data loads */
+@utility skeleton {
+  background: var(--raised);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* emoji picker dressed in the app's own colours */
+aside.EmojiPickerReact.epr-main {
+  --epr-bg-color: var(--raised);
+  --epr-category-label-bg-color: var(--raised);
+  --epr-text-color: var(--ink);
+  --epr-search-input-bg-color: var(--canvas);
+  --epr-search-input-bg-color-active: var(--canvas);
+  --epr-search-input-text-color: var(--ink);
+  --epr-search-input-placeholder-color: var(--faint);
+  --epr-search-border-color: var(--line-strong);
+  --epr-search-border-color-active: var(--line-strong);
+  --epr-hover-bg-color: var(--hover);
+  --epr-focus-bg-color: var(--hover);
+  --epr-highlight-color: var(--accent-text);
+  --epr-category-icon-active-color: var(--accent-text);
+  --epr-picker-border-color: transparent;
+  --epr-picker-border-radius: 0;
+  --epr-search-input-border-radius: 12px;
+  --epr-category-label-height: 34px;
+  font-family: var(--font-sans);
+}
+aside.EmojiPickerReact .epr-emoji-category-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
