@@ -35,7 +35,7 @@ const ImageLightbox = ({ items, index = 0, src, user, title, onClose }) => {
   return (
     <motion.div role='dialog' aria-modal='true' aria-label={title || 'Image'} onClick={onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
-      className='fixed inset-0 z-[60] flex flex-col bg-black/85 backdrop-blur-xl'>
+      className='fixed inset-0 z-[60] flex flex-col bg-black/90 md:bg-black/85 md:backdrop-blur-xl'>
       <div className='flex items-center justify-between gap-3 p-4 shrink-0'>
         <p className='truncate pl-2 text-[15px] font-semibold text-white'>
           {title}

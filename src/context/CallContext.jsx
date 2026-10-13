@@ -12,11 +12,22 @@ const ACK_TIMEOUT_MS = 10000;
 const CONNECT_TIMEOUT_MS = 30000;
 // how long a call that lost its connection waits for it to come back
 const RECONNECT_TIMEOUT_MS = 15000;
+// the server's list holds logins that run out, it is asked again after this long
+const ICE_REUSE_MS = 30 * 60 * 1000;
 
 const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const CAMERA_CONSTRAINTS = { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } };
 
 export const canShareScreen = () => Boolean(navigator.mediaDevices?.getDisplayMedia);
+
+// For testing a TURN server: with localStorage.forceRelay = "1" a call only uses the relay
+const relayOnly = () => {
+  try {
+    return localStorage.getItem("forceRelay") === "1";
+  } catch {
+    return false;
+  }
+};
 
 const firstNameOf = (user) => user?.fullName?.split(" ")[0] || "They";
 
@@ -40,6 +51,7 @@ const mediaErrorText = (error) => {
 //   phase      "calling" | "incoming" | "connecting" | "connected" | "reconnecting"
 //   connectedAt  when the two browsers first reached each other
 //   micOn, camOn, sharing    what I am sending
+//   facing     "user" | "environment": which camera of a phone is in use
 //   remote     { audio, video, screen }: what the other person says they are sending
 // }
 export const CallProvider = ({ children }) => {
@@ -63,7 +75,8 @@ export const CallProvider = ({ children }) => {
   const screenTrack = useRef(null);
   const pendingCandidates = useRef([]); // candidates that arrived before the offer or answer
   const signalChain = useRef(Promise.resolve()); // signals are handled one after the other
-  const iceServers = useRef(null);
+  const iceServers = useRef(null); // { servers, relay, loadedAt }
+  const wakeLock = useRef(null);
   const stopRingtone = useRef(null);
   const connectTimer = useRef(null);
   const reconnectTimer = useRef(null);
@@ -109,6 +122,8 @@ export const CallProvider = ({ children }) => {
     peerRef.current = null;
     pendingCandidates.current = [];
     signalChain.current = Promise.resolve();
+    wakeLock.current?.release().catch(() => {});
+    wakeLock.current = null;
     releaseMedia();
     setLocalVideo(null);
     setRemoteStream(null);
@@ -168,23 +183,44 @@ export const CallProvider = ({ children }) => {
   };
 
   const loadIceServers = async () => {
-    if (iceServers.current) return iceServers.current;
+    const known = iceServers.current;
+    if (known && Date.now() - known.loadedAt < ICE_REUSE_MS) return known.servers;
     try {
       const { data } = await axios.get("/api/calls/ice");
-      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) iceServers.current = data.iceServers;
+      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        iceServers.current = { servers: data.iceServers, relay: Boolean(data.relay), loadedAt: Date.now() };
+      }
     } catch {
-      // the call is tried with the public STUN server
+      // the call is tried with the list from before, or the public STUN server
     }
-    return iceServers.current || FALLBACK_ICE_SERVERS;
+    return iceServers.current?.servers || FALLBACK_ICE_SERVERS;
   };
 
-  // ends the call for both sides
-  const hangUp = useCallback((message) => {
+  // why the two browsers found no path to each other, in words that say what to do
+  const connectFailedText = () =>
+    iceServers.current?.relay
+      ? "Could not connect the call. Check your internet and try again"
+      : "Could not connect: this network blocks direct calls and no relay (TURN) server is set up";
+
+  // a phone must not switch its screen off in the middle of a call
+  const keepScreenOn = async () => {
+    try {
+      if (!wakeLock.current && navigator.wakeLock) wakeLock.current = await navigator.wakeLock.request("screen");
+    } catch {
+      // not allowed right now (battery saver, tab in the background)
+    }
+  };
+
+  // Ends the call for both sides. With `failed` the other side is told that the two browsers
+  // never reached each other, so it can say so too
+  const hangUp = useCallback((message, failed = false) => {
     const current = callRef.current;
     if (!current) return;
-    if (current.id) socketRef.current?.emit(current.phase === "incoming" ? "call:decline" : "call:end", { callId: current.id });
+    if (current.id) {
+      socketRef.current?.emit(current.phase === "incoming" ? "call:decline" : "call:end", { callId: current.id, failed });
+    }
     cleanup();
-    if (typeof message === "string") toast.error(message);
+    if (typeof message === "string") toast.error(message, { duration: 7000 });
   }, [cleanup]);
 
   // The connection between the two browsers. Only the caller makes offers, so the two never offer at once
@@ -192,7 +228,7 @@ export const CallProvider = ({ children }) => {
     const servers = await loadIceServers();
     if (!isCurrent(key)) return null; // the call ended while the list was loading
 
-    const peer = new RTCPeerConnection({ iceServers: servers });
+    const peer = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: relayOnly() ? "relay" : "all" });
     peerRef.current = peer;
 
     const remoteTracks = [];
@@ -211,6 +247,10 @@ export const CallProvider = ({ children }) => {
         reconnectTimer.current = null;
         update({ phase: "connected", connectedAt: callRef.current?.connectedAt || Date.now() });
         sendMediaState();
+        keepScreenOn();
+      } else if (state === "failed" && !callRef.current?.connectedAt) {
+        // every path was tried and none works, waiting longer changes nothing
+        hangUp(connectFailedText(), true);
       } else if ((state === "disconnected" || state === "failed") && callRef.current?.connectedAt) {
         update({ phase: "reconnecting" });
         if (state === "failed") {
@@ -221,10 +261,7 @@ export const CallProvider = ({ children }) => {
         reconnectTimer.current ||= setTimeout(() => hangUp("The connection was lost"), RECONNECT_TIMEOUT_MS);
       }
     };
-    connectTimer.current = setTimeout(
-      () => hangUp("Could not connect. One of the networks may be blocking direct calls"),
-      CONNECT_TIMEOUT_MS
-    );
+    connectTimer.current = setTimeout(() => hangUp(connectFailedText(), true), CONNECT_TIMEOUT_MS);
 
     if (isCaller) {
       peer.onnegotiationneeded = async () => {
@@ -289,7 +326,7 @@ export const CallProvider = ({ children }) => {
     const wantsVideo = kind === "video";
     update({
       key, id: null, peer, kind, direction: "outgoing", phase: "calling", connectedAt: null,
-      micOn: true, camOn: wantsVideo, sharing: false,
+      micOn: true, camOn: wantsVideo, sharing: false, facing: "user",
       remote: { audio: true, video: wantsVideo, screen: false },
     });
 
@@ -379,10 +416,31 @@ export const CallProvider = ({ children }) => {
         const [track] = stream.getVideoTracks();
         if (!isCurrent(current.key)) return track.stop();
         cameraTrack.current = track;
-        update({ camOn: true });
+        update({ camOn: true, facing: "user" });
       } catch (error) {
         return toast.error(error?.name === "NotAllowedError" ? "Allow camera access to turn it on" : "Could not turn the camera on");
       }
+    }
+    await syncVideo();
+  };
+
+  // front camera <-> back camera of a phone
+  const switchCamera = async () => {
+    const current = callRef.current;
+    if (!current?.camOn) return;
+    const facing = current.facing === "environment" ? "user" : "environment";
+    // a phone cannot open both cameras, the one in use is closed first
+    cameraTrack.current?.stop();
+    cameraTrack.current = null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { ...CAMERA_CONSTRAINTS, facingMode: facing } });
+      const [track] = stream.getVideoTracks();
+      if (!isCurrent(current.key)) return track.stop();
+      cameraTrack.current = track;
+      update({ facing });
+    } catch {
+      update({ camOn: false });
+      toast.error("Could not switch the camera");
     }
     await syncVideo();
   };
@@ -425,7 +483,7 @@ export const CallProvider = ({ children }) => {
       const isVideo = kind === "video";
       update({
         key: (callCounter.current += 1), id: callId, peer: from, kind, direction: "incoming", phase: "incoming", connectedAt: null,
-        micOn: true, camOn: false, sharing: false,
+        micOn: true, camOn: false, sharing: false, facing: "user",
         remote: { audio: true, video: isVideo, screen: false },
       });
       stopRingtone.current = startRingtone("incoming");
@@ -458,6 +516,7 @@ export const CallProvider = ({ children }) => {
       if (reason === "declined" && current.direction === "outgoing") toast(`${name} declined the call`, { icon: "📵" });
       else if (reason === "missed" && current.direction === "outgoing") toast(`${name} did not answer`, { icon: "📵" });
       else if (reason === "disconnected") toast(`${name} lost their connection`, { icon: "📵" });
+      else if (reason === "failed") toast.error(connectFailedText(), { duration: 7000 });
     };
 
     // without the socket the server has already ended the call
@@ -486,7 +545,7 @@ export const CallProvider = ({ children }) => {
 
   const value = useMemo(() => ({
     call, localVideo, remoteStream, isMinimized, setIsMinimized,
-    startCall, acceptCall, declineCall, hangUp, toggleMic, toggleCamera, toggleScreenShare,
+    startCall, acceptCall, declineCall, hangUp, toggleMic, toggleCamera, switchCamera, toggleScreenShare,
     // the functions read the current call through refs, so they never go stale
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [call, localVideo, remoteStream, isMinimized]);

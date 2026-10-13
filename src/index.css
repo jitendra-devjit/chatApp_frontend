@@ -83,6 +83,18 @@
   --animate-typing: typing-bounce 1.2s ease-in-out infinite;
   --animate-shine: shine 2.8s ease-in-out infinite;
   --animate-ping-soft: ping-soft 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  /* phone: a chat slides in over the list, the list slides back when the chat closes */
+  --animate-chat-in: chat-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-list-in: list-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes chat-in {
+  from { transform: translate3d(28%, 0, 0); opacity: 0; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+@keyframes list-in {
+  from { transform: translate3d(-12%, 0, 0); opacity: 0; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
 }
 
 @keyframes drift-a {
@@ -118,6 +130,14 @@ body,
   height: 100%;
 }
 
+html {
+  /* no grey flash under a finger, no pull-to-refresh or bounce behind the app, no double-tap zoom delay */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   background: var(--canvas);
   color: var(--ink);
@@ -129,6 +149,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* iOS zooms the whole page into a text box whose text is smaller than 16px */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 ::selection {
@@ -181,6 +211,12 @@ input::-ms-clear {
 
 /* ---------- pieces used in several places ---------- */
 
+/* The height of the screen that is really visible. main.jsx keeps --app-height equal to it
+   where the keyboard covers the page instead of resizing it (iOS) */
+@utility h-app {
+  height: var(--app-height, 100dvh);
+}
+
 /* frosted panel that lets the aurora glow through */
 @utility glass {
   background: var(--panel);
@@ -188,6 +224,23 @@ input::-ms-clear {
   box-shadow: var(--panel-shadow);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   backdrop-filter: blur(28px) saturate(150%);
+
+  /* On a phone a panel fills the screen. Blurring everything behind it on every frame is the
+     slowest thing a phone can be asked to do, and the still aurora behind needs no blur */
+  @media (max-width: 767px) {
+    background: color-mix(in oklab, var(--panel-solid) 86%, transparent);
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* the aurora of a phone: the same three colours, painted once */
+.aurora-still {
+  background:
+    radial-gradient(90vw 60vh at 0% 0%, var(--a1), transparent 70%),
+    radial-gradient(80vw 55vh at 100% 35%, var(--a3), transparent 70%),
+    radial-gradient(90vw 60vh at 40% 110%, var(--a2), transparent 70%);
 }
 
 /* the accent gradient as a fill */

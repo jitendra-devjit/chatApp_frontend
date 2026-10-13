@@ -1,7 +1,9 @@
-import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
+import toast from 'react-hot-toast'
 import { ArrowDown, ArrowLeft, CircleNotch, CloudArrowUp, Info, Lightning, MagnifyingGlass, Phone, Trash, VideoCamera } from '@phosphor-icons/react'
 import { formatDayLabel, formatLastSeen, isSameDay } from '../lib/utils'
+import { isTouchDevice } from '../lib/backButton'
 import { AuthContext } from '../context/AuthContext';
 import { CallContext } from '../context/CallContext';
 import { ChatContext } from '../context/ChatContext';
@@ -12,6 +14,7 @@ import IconButton from './IconButton';
 import { LogoMark } from './Logo';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
+import MessageSheet from './MessageSheet';
 import { ConfirmDialog } from './Modal';
 import TypingDots from './TypingDots';
 
@@ -76,6 +79,8 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const [highlightId, setHighlightId] = useState(null); // message the user jumped to
   const [isSearching, setIsSearching] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [sheetId, setSheetId] = useState(null); // message whose options sheet is open (touch screens)
+  const isTouch = useMemo(isTouchDevice, []);
   const scrollRef = useRef(null);
   const composerRef = useRef(null);
   // drag events fire for every element the pointer crosses, this counts in and out
@@ -94,6 +99,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     setEditingMessage(null);
     setDeleteTarget(null);
     setOpenMenu(null);
+    setSheetId(null);
     setIsSearching(false);
   }, [selectedId]);
 
@@ -185,8 +191,9 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   };
 
   // a picture that finishes loading makes the list taller, stay at the bottom if we were there
+  // (read through the ref: messages keep the first version of this function, see MessageBubble)
   const handleImageLoad = () => {
-    if (isAtBottom) scrollToBottom();
+    if (isAtBottomRef.current) scrollToBottom();
   };
 
   // ---------- files dragged onto the chat ----------
@@ -268,6 +275,18 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     return sent;
   };
 
+  const copyMessage = async (message) => {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      toast.success('Copied');
+    } catch {
+      toast.error('Could not copy');
+    }
+  };
+
+  // looked up on every render, so a reaction that arrives while the sheet is open shows in it
+  const sheetMessage = sheetId ? messages.find((message) => message._id === sheetId) : null;
+
   const confirmDelete = async () => {
     const target = deleteTarget;
     setDeleteTarget(null);
@@ -278,7 +297,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
 
   return (
     <section onDragEnter={handleDragEnter} onDragOver={(e) => carriesFiles(e) && e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
-      className='glass relative flex-1 flex flex-col min-h-0 min-w-0 md:rounded-[28px] overflow-hidden max-md:border-0'>
+      className='glass relative flex-1 flex flex-col min-h-0 min-w-0 md:rounded-[28px] overflow-hidden max-md:border-0 max-md:animate-chat-in'>
       <AnimatePresence>
         {isDraggingFiles && (
           <motion.div key='drop' data-drop-zone initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -322,7 +341,8 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
         <IconButton label='Search in this chat' active={isSearching} onClick={() => setIsSearching(!isSearching)}>
           <MagnifyingGlass size={21} weight={isSearching ? 'bold' : 'regular'} />
         </IconButton>
-        <IconButton label={isDetailsOpen ? 'Hide details' : 'Show details'} active={isDetailsOpen} onClick={onToggleDetails}>
+        {/* on a phone a tap on the name opens the details, the room goes to the name */}
+        <IconButton label={isDetailsOpen ? 'Hide details' : 'Show details'} active={isDetailsOpen} onClick={onToggleDetails} className='max-sm:hidden'>
           <Info size={23} weight={isDetailsOpen ? 'fill' : 'duotone'} />
         </IconButton>
       </header>
@@ -390,6 +410,8 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                         getName={getName}
                         openMenu={openMenu}
                         setOpenMenu={setOpenMenu}
+                        isTouch={isTouch}
+                        onOpenSheet={(message) => setSheetId(message._id)}
                         onReply={startReply}
                         onEdit={startEdit}
                         onDelete={setDeleteTarget}
@@ -442,6 +464,15 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
           <ConfirmDialog key='delete' danger icon={<Trash size={26} weight='duotone' />}
             title='Delete this message?' text='It will be removed for everyone in this chat. This cannot be undone.'
             confirmLabel='Delete' onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {sheetMessage && !sheetMessage.deletedAt && (
+          <MessageSheet key='sheet' msg={sheetMessage} myId={authUser._id} isOwn={sheetMessage.senderId === authUser._id}
+            authorName={sheetMessage.senderId === authUser._id ? 'You' : findUser(sheetMessage.senderId)?.fullName || 'Someone'}
+            onClose={() => setSheetId(null)} onReply={startReply} onEdit={startEdit} onDelete={setDeleteTarget}
+            onReact={(message, emoji) => reactToMessage(message._id, emoji)} onCopy={copyMessage} />
         )}
       </AnimatePresence>
     </section>

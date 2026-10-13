@@ -8,6 +8,12 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 const api = axios.create({ baseURL: backendUrl });
 
+// The free server sleeps after a while without visitors and needs up to a minute to start.
+// Knocking as soon as the page opens means it is usually awake by the time it is needed
+api.get("/api/status").catch(() => {});
+
+const SLOW_REQUEST_MS = 4000;
+
 const readStoredToken = () => {
   try {
     return localStorage.getItem("token");
@@ -90,6 +96,10 @@ export const AuthProvider = ({ children }) => {
   // Login function to handle user authentication. Resolves to true on success
 
   const login = async (state, credentials) => {
+    const slow = setTimeout(
+      () => toast.loading("Waking the server up, this can take up to a minute…", { id: "wake" }),
+      SLOW_REQUEST_MS
+    );
     try {
       const { data } = await api.post(`/api/auth/${state}`, credentials);
       storeToken(data.token);
@@ -99,6 +109,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       toast.error(getErrorMessage(error));
       return false;
+    } finally {
+      clearTimeout(slow);
+      toast.dismiss("wake");
     }
   };
 
@@ -139,7 +152,8 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!userId || !token) return;
 
-    const newSocket = io(backendUrl, { auth: { token } });
+    // straight to a websocket, without the slower "polling first, then upgrade" start. Polling stays as the fallback
+    const newSocket = io(backendUrl, { auth: { token }, transports: ["websocket", "polling"], tryAllTransports: true });
     newSocket.on("getOnlineUsers", setOnlineUsers);
     setSocket(newSocket);
 

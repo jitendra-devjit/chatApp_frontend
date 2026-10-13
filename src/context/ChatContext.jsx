@@ -2,12 +2,16 @@ import React, { createContext, useState, useEffect, useContext, useRef, useCallb
 import { AuthContext } from "./AuthContext.jsx";
 import toast from "react-hot-toast";
 import { APP_NAME, describeCall, getErrorMessage } from "../lib/utils";
+import { isPhoneLayout, useBackButton } from "../lib/backButton";
 import { isNotifyEnabled, playMessageSound, showNotification } from "../lib/notify";
 
 export const ChatContext = createContext();
 
 // how long "typing" stays on screen without a fresh signal
 const TYPING_TIMEOUT_MS = 5000;
+// the newest messages of this many chats are kept, so coming back to a chat shows it at once
+const MAX_CACHED_CHATS = 30;
+const CACHED_MESSAGES = 50;
 
 const toPreview = (message) => ({
   _id: message._id,
@@ -79,6 +83,24 @@ export const ChatProvider = ({ children }) => {
   // "<chat id>:<user id>" -> timer that clears "typing" if the stop signal never arrives
   const typingTimers = useRef({});
 
+  // chat id -> { messages, hasMore } as they were when the chat was last on screen
+  const messageCache = useRef(new Map());
+  const messagesOwner = useRef(null); // the chat the `messages` state belongs to
+
+  // on a phone the chat covers the list, so "back" returns to the list
+  useBackButton(Boolean(selectedId) && isPhoneLayout(), () => setSelectedId(null));
+
+  // remember what the open chat looks like. Declared before the effect that opens a chat:
+  // when the chat changes, this must not file the old messages under the new chat
+  useEffect(() => {
+    const chatId = messagesOwner.current;
+    if (!chatId || chatId !== selectedIdRef.current || messages.length === 0) return;
+    const cache = messageCache.current;
+    cache.delete(chatId); // puts it last, the chat not opened for the longest time goes first
+    cache.set(chatId, { messages: messages.slice(-CACHED_MESSAGES), hasMore: hasMore || messages.length > CACHED_MESSAGES });
+    if (cache.size > MAX_CACHED_CHATS) cache.delete(cache.keys().next().value);
+  }, [messages, hasMore]);
+
   const showError = (error) => {
     if (error.response?.status !== 401) toast.error(getErrorMessage(error));
   };
@@ -114,6 +136,7 @@ export const ChatProvider = ({ children }) => {
     setUnseenMessages({});
     setLastMessages({});
     setTyping({});
+    messageCache.current.clear();
   }, [authUserId, loadChats]);
 
   // somebody who signed up after the list was loaded came online
@@ -133,14 +156,17 @@ export const ChatProvider = ({ children }) => {
   //function to get the newest messages of the open chat
   const openChatId = selectedChat?._id;
   useEffect(() => {
-    setMessages([]);
-    setHasMore(false);
     setJumpTarget(null);
     const chat = chatsRef.current.find((item) => item._id === openChatId);
+    // what this chat showed last time is on screen at once, the fresh page from the server replaces it
+    const cached = chat ? messageCache.current.get(chat._id) : null;
+    messagesOwner.current = chat?._id || null;
+    setMessages(cached?.messages || []);
+    setHasMore(Boolean(cached?.hasMore));
     if (!chat) return;
 
     let cancelled = false;
-    setIsLoadingMessages(true);
+    setIsLoadingMessages(!cached);
     axios
       .get(messagesUrl(chat))
       .then(({ data }) => {

@@ -1,15 +1,44 @@
-import React from 'react'
+import React, { lazy, Suspense, useContext, useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { motion } from 'motion/react'
-import HomePage from './pages/HomePage.jsx'
-import LoginPage from './pages/LoginPage.jsx'
-import ProfilePage from './pages/ProfilePage.jsx'
 import {Toaster} from "react-hot-toast"
 import { AuthContext } from './context/AuthContext.jsx'
-import { useContext } from 'react'
 import Aurora from './components/Aurora.jsx'
 import CallOverlay from './components/CallOverlay.jsx'
 import { LogoMark } from './components/Logo.jsx'
+
+// each page is its own download, so the login screen does not wait for the whole chat app
+const HomePage = lazy(() => import('./pages/HomePage.jsx'))
+const LoginPage = lazy(() => import('./pages/LoginPage.jsx'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'))
+
+// the free server sleeps when nobody uses it, waking it up takes a while
+const SLOW_START_MS = 4000
+
+// The logo breathing in the middle of the screen. After a few seconds it explains the wait
+const Loader = ({ explain = false }) => {
+  const [isSlow, setIsSlow] = useState(false)
+  useEffect(() => {
+    if (!explain) return
+    const timer = setTimeout(() => setIsSlow(true), SLOW_START_MS)
+    return () => clearTimeout(timer)
+  }, [explain])
+
+  return (
+    <div className='h-app grid place-items-center' role='status' aria-label='Loading'>
+      <div className='text-center'>
+        <motion.div animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} className='w-fit mx-auto'>
+          <LogoMark className='w-14 h-14' />
+        </motion.div>
+        {isSlow && (
+          <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className='mt-6 px-8 text-sm font-medium text-muted'>
+            Waking the server up, this can take up to a minute…
+          </motion.p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 const toastOptions = {
   duration: 3500,
@@ -40,12 +69,10 @@ const App = () => {
   // wait for the saved session before deciding between chat and login
   if (isCheckingAuth) {
     return (
-      <div className='h-dvh grid place-items-center' role='status' aria-label='Loading'>
+      <>
         <Aurora />
-        <motion.div animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}>
-          <LogoMark className='w-14 h-14' />
-        </motion.div>
-      </div>
+        <Loader explain />
+      </>
     )
   }
 
@@ -53,12 +80,14 @@ const App = () => {
     <>
       <Aurora />
       <Toaster position='bottom-center' containerStyle={{ bottom: 104 }} toastOptions={toastOptions}/>
-      <Routes>
-        <Route path='/' element={authUser ? <Page><HomePage /></Page> : <Navigate to="/login"/>} />
-        <Route path='/login' element={!authUser ? <Page><LoginPage /></Page> : <Navigate to="/"/>} />
-        <Route path='/profile' element={authUser ? <Page><ProfilePage /></Page> : <Navigate to="/login"/>} />
-        <Route path='*' element={<Navigate to="/"/>} />
-      </Routes>
+      <Suspense fallback={<Loader />}>
+        <Routes>
+          <Route path='/' element={authUser ? <Page><HomePage /></Page> : <Navigate to="/login" replace/>} />
+          <Route path='/login' element={!authUser ? <Page><LoginPage /></Page> : <Navigate to="/" replace/>} />
+          <Route path='/profile' element={authUser ? <Page><ProfilePage /></Page> : <Navigate to="/login" replace/>} />
+          <Route path='*' element={<Navigate to="/" replace/>} />
+        </Routes>
+      </Suspense>
       {/* a call stays on screen whichever page is open */}
       <CallOverlay />
     </>

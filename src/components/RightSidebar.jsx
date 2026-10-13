@@ -128,7 +128,7 @@ const RightSidebar = ({ onClose, onOpenImage }) => {
   return (
     <>
       <motion.div onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className='fixed inset-0 z-30 bg-overlay backdrop-blur-sm xl:hidden' />
+        className='fixed inset-0 z-30 bg-overlay md:backdrop-blur-sm xl:hidden' />
       <motion.aside aria-label={`${isGroup ? 'Group' : 'Profile of'} ${selectedChat.fullName}`}
         initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
         transition={{ type: 'spring', stiffness: 420, damping: 38 }}

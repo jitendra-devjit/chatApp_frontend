@@ -163,7 +163,7 @@ const LoginPage = () => {
   }
 
   return (
-    <div className='h-dvh overflow-y-auto'>
+    <div className='h-app overflow-y-auto'>
       <div className='min-h-full max-w-6xl mx-auto grid lg:grid-cols-[1.05fr_1fr] items-center gap-10 px-5 sm:px-8 py-6'>
         {/* -------------------left------------------ */}
 

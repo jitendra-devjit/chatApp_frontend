@@ -24,7 +24,7 @@ const actionClass = 'inline-flex items-center gap-2 h-10 px-4 rounded-full bg-ra
 const PhotoPreview = ({ photo, name, onUse, onPickAnother, onCancel }) => (
   <motion.div role='dialog' aria-modal='true' aria-label='Preview photo' onClick={onCancel}
     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    className='fixed inset-0 z-50 grid place-items-center p-4 bg-overlay backdrop-blur-md'>
+    className='fixed inset-0 z-50 grid place-items-center p-4 bg-overlay md:backdrop-blur-md'>
     <motion.div onClick={(e) => e.stopPropagation()}
       initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 10 }} transition={spring}
       className='w-full max-w-sm p-6 rounded-[32px] bg-panel-solid border border-line-strong shadow-2xl text-center'>
@@ -112,7 +112,7 @@ const ProfilePage = () => {
   }
 
   return (
-    <div className='h-dvh overflow-y-auto'>
+    <div className='h-app overflow-y-auto'>
       <div className='max-w-2xl mx-auto px-4 py-6 sm:py-10'>
         <div className='flex items-center gap-3'>
           <motion.button type='button' onClick={()=>navigate('/')} whileTap={{ scale: 0.92 }} aria-label='Back to chats'

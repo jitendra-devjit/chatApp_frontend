@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { UsersThree } from '@phosphor-icons/react'
 import { getAvatarGradient, getInitials } from '../lib/utils'
+import { thumbnailUrl } from '../lib/upload'
 
 const SIZES = {
   xs: 'w-7 h-7 text-[10px]',
@@ -10,6 +11,9 @@ const SIZES = {
   xl: 'w-28 h-28 text-4xl',
   '2xl': 'w-36 h-36 text-5xl',
 }
+
+// how wide a picture is asked for, twice the size on screen so it stays sharp on a phone
+const PIXELS = { xs: 64, sm: 96, md: 128, lg: 160, xl: 320, '2xl': 480 }
 
 const DOTS = {
   xs: 'w-2 h-2 ring-2',
@@ -34,13 +38,16 @@ const BADGES = {
 const Avatar = ({ user, src, size = 'md', online = false, ring = false, group = false, className = '' }) => {
   const [failedSrc, setFailedSrc] = useState(null)
   const name = user?.fullName || ''
-  const image = src ?? user?.profilePic
+  // a profile photo is uploaded at 640px, a list of them at that size is a lot to download
+  const image = thumbnailUrl(src ?? user?.profilePic, PIXELS[size])
   const showImage = image && failedSrc !== image
 
   const face = showImage ? (
     <img
       src={image}
       alt=""
+      loading='lazy'
+      decoding='async'
       draggable={false}
       onError={() => setFailedSrc(image)}
       className={`${SIZES[size]} rounded-full object-cover bg-raised`}

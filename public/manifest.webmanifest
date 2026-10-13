@@ -1,0 +1,14 @@
+{
+  "name": "Adda",
+  "short_name": "Adda",
+  "description": "Realtime chat with your people: messages, groups, voice notes and calls.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#06060c",
+  "theme_color": "#06060c",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -2,11 +2,12 @@ import React, { useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowsInSimple, ArrowsOutSimple, Microphone, MicrophoneSlash, MonitorArrowUp, Phone, PhoneDisconnect, PhoneX,
+  ArrowsInSimple, ArrowsOutSimple, CameraRotate, Microphone, MicrophoneSlash, MonitorArrowUp, Phone, PhoneDisconnect, PhoneX,
   VideoCamera, VideoCameraSlash,
 } from '@phosphor-icons/react'
 import { CallContext, canShareScreen } from '../context/CallContext'
 import { formatCallClock } from '../lib/utils'
+import { isTouchDevice, useBackButton } from '../lib/backButton'
 import Avatar from './Avatar'
 
 const spring = { type: 'spring', stiffness: 420, damping: 32 };
@@ -31,8 +32,17 @@ const StreamPlayer = ({ as: Tag = 'video', stream, ...props }) => {
     const element = ref.current;
     if (!element || element.srcObject === stream) return;
     element.srcObject = stream;
-    // autoplay can be refused until the page was clicked, starting or answering a call is such a click
-    if (stream) element.play?.().catch(() => {});
+    if (!stream) return;
+    // Autoplay can be refused when the tap that started or answered the call was too long ago
+    // (phones are strict about it). The next touch anywhere starts the sound then
+    let retry = null;
+    element.play?.().catch(() => {
+      retry = () => element.play?.().catch(() => {});
+      document.addEventListener('pointerdown', retry, { once: true });
+    });
+    return () => {
+      if (retry) document.removeEventListener('pointerdown', retry);
+    };
   }, [stream]);
   return <Tag ref={ref} autoPlay playsInline {...props} />;
 };
@@ -75,9 +85,12 @@ const statusOf = (call, elapsed) => {
 const CallOverlay = () => {
   const {
     call, localVideo, remoteStream, isMinimized, setIsMinimized,
-    acceptCall, declineCall, hangUp, toggleMic, toggleCamera, toggleScreenShare,
+    acceptCall, declineCall, hangUp, toggleMic, toggleCamera, switchCamera, toggleScreenShare,
   } = useContext(CallContext);
   const elapsed = useElapsed(call?.connectedAt);
+
+  // "back" on a phone shrinks the call to the pill, it never hangs up
+  useBackButton(Boolean(call) && !isMinimized && call.phase !== 'incoming', () => setIsMinimized(true));
 
   const isLive = call?.phase === 'connected' || call?.phase === 'reconnecting';
   const isIncoming = call?.phase === 'incoming';
@@ -98,8 +111,8 @@ const CallOverlay = () => {
             className='fixed inset-0 z-[70] flex flex-col overflow-hidden bg-canvas'>
             {/* ---- backdrop: the accent colours drifting behind everything ---- */}
             <div className='absolute inset-0 pointer-events-none' aria-hidden='true'>
-              <div className='absolute -top-1/4 -left-1/4 w-[70vmax] h-[70vmax] rounded-full grad opacity-35 blur-[120px] animate-drift-a' />
-              <div className='absolute -bottom-1/3 -right-1/4 w-[60vmax] h-[60vmax] rounded-full grad opacity-25 blur-[140px] animate-drift-b' />
+              <div className='absolute -top-1/4 -left-1/4 w-[70vmax] h-[70vmax] rounded-full grad opacity-35 blur-[120px] animate-drift-a max-md:animate-none' />
+              <div className='absolute -bottom-1/3 -right-1/4 w-[60vmax] h-[60vmax] rounded-full grad opacity-25 blur-[140px] animate-drift-b max-md:animate-none' />
             </div>
 
             {/* ---- the other person's camera or screen ---- */}
@@ -115,7 +128,7 @@ const CallOverlay = () => {
             </AnimatePresence>
 
             {/* ---- top bar ---- */}
-            <div className={`relative z-10 flex items-center gap-3 h-[72px] px-4 sm:px-6 shrink-0 ${showRemoteVideo ? 'text-white' : ''}`}>
+            <div className={`relative z-10 flex items-center gap-3 h-[72px] px-4 sm:px-6 shrink-0 box-content pt-[env(safe-area-inset-top)] ${showRemoteVideo ? 'text-white' : ''}`}>
               {!isIncoming && (
                 <motion.button type='button' aria-label='Minimise call' title='Back to chat' whileTap={{ scale: 0.9 }} onClick={() => setIsMinimized(true)}
                   className='glass grid place-items-center w-11 h-11 rounded-full'>
@@ -168,8 +181,15 @@ const CallOverlay = () => {
                 <motion.div key='self' drag dragMomentum={false} dragElastic={0.08} whileDrag={{ scale: 1.04 }}
                   initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={spring}
                   className='absolute z-20 right-4 sm:right-6 bottom-32 sm:bottom-36 w-28 sm:w-56 aspect-[3/4] sm:aspect-video rounded-3xl overflow-hidden bg-black border border-line-strong shadow-2xl shadow-black/60 cursor-grab active:cursor-grabbing'>
+                  {/* the front camera is shown like a mirror, the way people know their own face */}
                   <StreamPlayer stream={localVideo} muted data-call-local-video
-                    className={`w-full h-full pointer-events-none ${call.sharing ? 'object-contain' : 'object-cover -scale-x-100'}`} />
+                    className={`w-full h-full pointer-events-none ${call.sharing ? 'object-contain' : call.facing === 'environment' ? 'object-cover' : 'object-cover -scale-x-100'}`} />
+                  {call.camOn && !call.sharing && isTouchDevice() && (
+                    <button type='button' aria-label='Switch camera' data-call-flip onClick={switchCamera} onPointerDownCapture={(e) => e.stopPropagation()}
+                      className='absolute right-1.5 bottom-1.5 grid place-items-center w-9 h-9 rounded-full bg-black/55 text-white'>
+                      <CameraRotate size={18} weight='fill' />
+                    </button>
+                  )}
                   {call.sharing && (
                     <span className='absolute left-2 bottom-2 px-2 h-6 grid place-items-center rounded-full grad text-[11px] font-bold text-white'>Your screen</span>
                   )}
@@ -178,7 +198,7 @@ const CallOverlay = () => {
             </AnimatePresence>
 
             {/* ---- controls ---- */}
-            <div className='relative z-10 flex justify-center px-4 pb-8 sm:pb-10 shrink-0'>
+            <div className='relative z-10 flex justify-center px-4 pb-[max(2rem,env(safe-area-inset-bottom))] sm:pb-10 shrink-0'>
               {isIncoming ? (
                 <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={spring} className='flex flex-col items-center gap-6'>
                   <div className='flex items-start gap-14 sm:gap-20'>
@@ -225,7 +245,7 @@ const CallOverlay = () => {
       {/* ---- minimised: a pill that floats over the app ---- */}
       <AnimatePresence>
         {call && isMinimized && (
-          <div key='pill' className='fixed inset-x-0 top-3 z-[70] flex justify-center px-3 pointer-events-none'>
+          <div key='pill' className='fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex justify-center px-3 pointer-events-none'>
             <motion.div data-call-pill drag dragMomentum={false} dragElastic={0.08}
               initial={{ opacity: 0, y: -40, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -40, scale: 0.9 }} transition={spring}
               className='pointer-events-auto grad glow p-[1.5px] rounded-full cursor-grab active:cursor-grabbing'>

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'motion/react'
 import { X } from '@phosphor-icons/react'
+import { useBackButton } from '../lib/backButton'
 
 const spring = { type: 'spring', stiffness: 460, damping: 36 }
 
@@ -9,6 +10,9 @@ const spring = { type: 'spring', stiffness: 460, damping: 36 }
 // It is rendered into <body>, because the glass panels would otherwise trap it inside themselves.
 // Render inside <AnimatePresence>
 const Modal = ({ label, role = 'dialog', onClose, className = 'max-w-md', children }) => {
+  // the back button of a phone closes the dialog
+  useBackButton(true, onClose)
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') onClose()
@@ -20,7 +24,7 @@ const Modal = ({ label, role = 'dialog', onClose, className = 'max-w-md', childr
   return createPortal(
     <motion.div role={role} aria-modal='true' aria-label={label} onClick={onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className='fixed inset-0 z-50 grid place-items-center p-4 bg-overlay backdrop-blur-md'>
+      className='fixed inset-0 z-50 grid place-items-center p-4 bg-overlay md:backdrop-blur-md'>
       <motion.div onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.92, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 8 }} transition={spring}
         className={`w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-[30px] bg-panel-solid border border-line-strong shadow-2xl ${className}`}>

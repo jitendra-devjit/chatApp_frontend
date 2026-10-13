@@ -1,5 +1,5 @@
-import React from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import React, { useRef } from 'react'
+import { AnimatePresence, motion, useMotionValue, useTransform } from 'motion/react'
 import { ArrowBendUpLeft, Check, Checks, Copy, DotsThree, Image as ImageIcon, Microphone, Paperclip, PencilSimple, Prohibit, Smiley, Trash, VideoCamera } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { describeAttachments, EDIT_WINDOW_MS, formatMessageTime, getNameColor, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
@@ -10,6 +10,10 @@ const bubbleSpring = { type: 'spring', stiffness: 520, damping: 34, mass: 0.8 };
 const popSpring = { type: 'spring', stiffness: 560, damping: 30 };
 
 const ATTACHMENT_ICONS = { image: ImageIcon, video: VideoCamera, audio: Microphone, file: Paperclip };
+
+// how far a message has to be dragged to the right to answer it, and how long a hold opens the sheet
+const SWIPE_REPLY_PX = 56;
+const LONG_PRESS_MS = 420;
 
 const actionClass = 'grid place-items-center w-8 h-8 rounded-full text-muted transition-colors hover:bg-hover hover:text-ink'
 const menuItemClass = 'flex items-center gap-2.5 w-full h-9 px-3 rounded-xl text-sm font-semibold text-left transition-colors hover:bg-hover'
@@ -28,12 +32,14 @@ const groupReactions = (reactions = [], myId) => {
 
 // One message with its quote, reactions, time and the actions that appear on hover (or on tap on a phone).
 // `openMenu` is { id, type, below } of the popover that is open anywhere in the list, type is
-// 'actions' (phone tap), 'react' or 'more'.
+// 'react' or 'more'.
+// With `isTouch` there is no hover: a tap or a hold on the message calls `onOpenSheet(msg)`
+// (see MessageSheet) and a swipe to the right answers it.
 // In a group, `sender` is given for other people's messages: their name and picture are shown.
 // `getName(userId)` gives the first name to show for the author of a quoted message
 const MessageBubble = ({
   msg, isOwn, isGroupStart, isGroupEnd, isNewDay, isFresh, isHighlighted, seen,
-  myId, sender, getName, openMenu, setOpenMenu,
+  myId, sender, getName, openMenu, setOpenMenu, isTouch, onOpenSheet,
   onReply, onEdit, onDelete, onReact, onOpenImage, onJumpTo, onImageLoad,
 }) => {
   const isDeleted = Boolean(msg.deletedAt);
@@ -62,10 +68,41 @@ const MessageBubble = ({
     setOpenMenu(menu?.type === type ? null : { id: msg._id, type, below });
   };
 
-  // phones have no hover: a tap on the bubble shows the actions
-  const handleBubbleTap = () => {
-    if (isDeleted || !window.matchMedia('(hover: none)').matches) return;
-    setOpenMenu(menu ? null : { id: msg._id, type: 'actions' });
+  // ---------- touch ----------
+  const canTouch = isTouch && !isDeleted;
+  const swipeX = useMotionValue(0);
+  const swipeHint = useTransform(swipeX, [8, SWIPE_REPLY_PX], [0, 1]);
+  const wasSwiped = useRef(false);
+  const holdTimer = useRef(null);
+  const wasHeld = useRef(false);
+
+  // a tap on the message itself opens the sheet. Pictures, players, links and quotes keep their own tap
+  const handleBubbleTap = (e) => {
+    if (!canTouch || wasSwiped.current || wasHeld.current) return;
+    if (e.target.closest('button, a, audio, video, input')) return;
+    onOpenSheet(msg);
+  };
+
+  // holding a finger on it opens the sheet too, also on a picture
+  const startHold = () => {
+    if (!canTouch) return;
+    wasHeld.current = false;
+    clearTimeout(holdTimer.current);
+    holdTimer.current = setTimeout(() => {
+      wasHeld.current = true;
+      navigator.vibrate?.(12);
+      onOpenSheet(msg);
+    }, LONG_PRESS_MS);
+  };
+  const cancelHold = () => clearTimeout(holdTimer.current);
+
+  const handleSwipeEnd = (e, info) => {
+    // the finger lifting must not count as a tap
+    setTimeout(() => { wasSwiped.current = false }, 80);
+    if (info.offset.x > SWIPE_REPLY_PX) {
+      navigator.vibrate?.(10);
+      onReply(msg);
+    }
   };
 
   const run = (action) => () => {
@@ -102,12 +139,24 @@ const MessageBubble = ({
       {sender && isGroupStart && (
         <p data-sender className='ml-10 mb-0.5 text-xs font-bold' style={{ color: getNameColor(sender.fullName) }}>{sender.fullName}</p>
       )}
-      <div className={`flex items-center gap-1 w-full ${isOwn ? 'flex-row-reverse' : ''}`}>
+      <motion.div
+        drag={canTouch ? 'x' : false} dragDirectionLock dragSnapToOrigin dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0, right: 0.4 }}
+        style={{ x: swipeX }}
+        onDragStart={() => { wasSwiped.current = true; cancelHold() }} onDragEnd={handleSwipeEnd}
+        className={`relative flex items-center gap-1 w-full ${isOwn ? 'flex-row-reverse' : ''}`}>
+        {canTouch && (
+          // slides in from the left edge while the message is dragged
+          <motion.span aria-hidden='true' style={{ opacity: swipeHint, scale: swipeHint }}
+            className='absolute -left-11 top-1/2 -mt-4 grid place-items-center w-8 h-8 rounded-full bg-raised border border-line text-accent-text'>
+            <ArrowBendUpLeft size={16} weight='bold' />
+          </motion.span>
+        )}
         {sender && (
           <div className='w-7 shrink-0 self-end mr-1'>{isGroupEnd && <Avatar user={sender} size='xs' />}</div>
         )}
-        <div onClick={handleBubbleTap}
-          className={`flex flex-col gap-[3px] min-w-0 max-w-[80%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''}`}>
+        <div onClick={handleBubbleTap} onTouchStart={startHold} onTouchMove={cancelHold} onTouchEnd={cancelHold} onTouchCancel={cancelHold}
+          onContextMenu={(e) => { if (canTouch) e.preventDefault() }}
+          className={`flex flex-col gap-[3px] min-w-0 max-w-[82%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''} ${canTouch ? 'select-none [-webkit-touch-callout:none]' : ''}`}>
           {media.length > 0 && (
             <MediaGrid items={media} corners={corners} onLoad={onImageLoad} onOpen={(index) => onOpenImage(media, index)} />
           )}
@@ -121,11 +170,11 @@ const MessageBubble = ({
           ) : emojiOnly ? (
             <p data-emoji-only className='text-[46px] leading-tight py-1'>{msg.text}</p>
           ) : (msg.text || msg.replyTo) && (
-            <div data-bubble className={`px-4 py-2.5 rounded-[22px] ${corners} text-[15px] leading-[1.4]
+            <div data-bubble className={`max-w-full min-w-0 px-4 py-2.5 rounded-[22px] ${corners} text-[15px] leading-[1.4]
               ${isOwn ? 'grad text-white shadow-lg shadow-[color-mix(in_oklab,var(--a2)_35%,transparent)]' : 'bg-bubble text-ink border border-line'}`}>
               {msg.replyTo && (
                 <button type='button' data-quote onClick={(e) => { e.stopPropagation(); onJumpTo(msg.replyTo._id) }}
-                  className={`flex items-center gap-2 w-full min-w-40 mb-1.5 px-2.5 py-1.5 rounded-xl border-l-[3px] text-left text-[13px] leading-snug
+                  className={`flex items-center gap-2 w-full min-w-0 sm:min-w-40 mb-1.5 px-2.5 py-1.5 rounded-xl border-l-[3px] text-left text-[13px] leading-snug
                     ${isOwn ? 'bg-white/20 border-white/80' : 'bg-raised border-accent-text'}`}>
                   <span className='min-w-0 flex-1'>
                     <span className={`block font-bold ${isOwn ? 'text-white' : 'text-accent-text'}`}>{replyAuthor}</span>
@@ -143,8 +192,8 @@ const MessageBubble = ({
           )}
         </div>
 
-        {/* ---- actions: shown on hover, or after a tap on a phone ---- */}
-        {!isDeleted && (
+        {/* ---- actions: shown on hover. Touch screens get the sheet instead ---- */}
+        {!isDeleted && !isTouch && (
           <div data-menu-root className={`relative flex items-center shrink-0 transition-opacity duration-150 ${isOwn ? 'flex-row-reverse' : ''}
             ${menu ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'}`}>
             <button type='button' aria-label='React' title='React' onClick={toggleMenu('react')} className={actionClass}>
@@ -198,7 +247,7 @@ const MessageBubble = ({
             </AnimatePresence>
           </div>
         )}
-      </div>
+      </motion.div>
 
       {reactions.length > 0 && (
         <div className={`relative z-10 flex flex-wrap gap-1 -mt-1.5 px-2 ${indent} ${isOwn ? 'justify-end' : ''}`}>
@@ -227,4 +276,15 @@ const MessageBubble = ({
   )
 }
 
-export default MessageBubble
+// A chat redraws for many reasons that do not touch a message: somebody is typing, another chat
+// got a message, a menu opened elsewhere. A message is only drawn again when what it shows changed.
+// The functions it is given are new on every render of the chat but do the same thing, so they are
+// left out of the comparison.
+const SHOWN = ['msg', 'isOwn', 'isGroupStart', 'isGroupEnd', 'isNewDay', 'isHighlighted', 'seen', 'myId', 'isTouch'];
+const sameSender = (a, b) => a === b || Boolean(a && b && a._id === b._id && a.fullName === b.fullName && a.profilePic === b.profilePic);
+// only the popover of this very message matters to it
+const ownMenu = (props) => (props.openMenu?.id === props.msg._id ? props.openMenu : null);
+const showsTheSame = (prev, next) =>
+  SHOWN.every((name) => prev[name] === next[name]) && sameSender(prev.sender, next.sender) && ownMenu(prev) === ownMenu(next);
+
+export default React.memo(MessageBubble, showsTheSame)

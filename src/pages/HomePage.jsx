@@ -6,6 +6,7 @@ import ChatContainer from '../components/ChatContainer'
 import RightSidebar from '../components/RightSidebar'
 import ImageLightbox from '../components/ImageLightbox'
 import { ChatContext } from '../context/ChatContext'
+import { useBackButton } from '../lib/backButton'
 
 const isWideScreen = () => window.matchMedia('(min-width: 80rem)').matches;
 
@@ -22,8 +23,12 @@ const HomePage = () => {
 
     const showDetails = Boolean(selectedChat) && isDetailsOpen;
 
+    // "back" on a phone closes the picture or the details drawer, not the app
+    useBackButton(Boolean(lightbox), closeLightbox);
+    useBackButton(showDetails && !isWideScreen(), closeDetails);
+
     return (
-    <main className='h-dvh flex md:gap-3 md:p-3'>
+    <main className='h-app flex md:gap-3 md:p-3 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]'>
         <NavRail />
         <Sidebar />
         <ChatContainer

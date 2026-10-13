@@ -173,7 +173,7 @@ const Sidebar = () => {
     : 'Nobody else has joined yet. Invite a friend to start talking.';
 
   return (
-    <aside className={`glass flex flex-col min-h-0 w-full md:w-[340px] md:shrink-0 md:rounded-[28px] max-md:border-0 ${selectedChat ? "max-md:hidden" : ''}`} >
+    <aside className={`glass flex flex-col min-h-0 w-full md:w-[340px] md:shrink-0 md:rounded-[28px] max-md:border-0 ${selectedChat ? "max-md:hidden" : 'max-md:animate-list-in'}`} >
         {/* phone header: brand and the actions that live in the rail on desktop */}
         <div className='md:hidden flex items-center justify-between px-4 pt-4'>
             <Logo />
