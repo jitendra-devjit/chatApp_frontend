@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useContext, useRef, useCallback, useMemo } from "react";
 import { AuthContext } from "./AuthContext.jsx";
 import toast from "react-hot-toast";
-import { APP_NAME, getErrorMessage } from "../lib/utils";
+import { APP_NAME, describeCall, getErrorMessage } from "../lib/utils";
 import { isNotifyEnabled, playMessageSound, showNotification } from "../lib/notify";
 
 export const ChatContext = createContext();
@@ -19,6 +19,7 @@ const toPreview = (message) => ({
     : undefined,
   deleted: Boolean(message.deletedAt),
   system: Boolean(message.system),
+  call: message.call,
   senderId: message.senderId,
   seen: Boolean(message.seen),
   createdAt: message.createdAt,
@@ -363,11 +364,13 @@ export const ChatProvider = ({ children }) => {
 
     const handleNewMessage = (newMessage) => {
       const me = authUserRef.current;
-      const chatId = newMessage.groupId || newMessage.senderId;
+      // only lines written by the server come back to me: group events, and the calls I made
+      const isMine = newMessage.senderId === me?._id;
+      const chatId = newMessage.groupId || (isMine ? newMessage.receiverId : newMessage.senderId);
       const chat = chatsRef.current.find((item) => item._id === chatId);
-      const isMine = newMessage.senderId === me?._id; // only the server's own lines in a group come back to me
       const isOpen = selectedIdRef.current === chatId;
-      const countsAsUnread = !isMine && !newMessage.system;
+      // of the calls, only one I did not pick up is news
+      const countsAsUnread = !isMine && !newMessage.system && (!newMessage.call || newMessage.call.status === "missed");
 
       // a group I was just added to and do not know yet
       if (!chat && newMessage.groupId) loadChats();
@@ -383,7 +386,7 @@ export const ChatProvider = ({ children }) => {
         playMessageSound();
         showNotification({
           title: chat?.isGroup ? `${senderName.split(" ")[0]} in ${chat.fullName}` : senderName,
-          body: newMessage.text || "Sent a photo",
+          body: newMessage.text || (newMessage.call ? describeCall(newMessage.call, false).preview : "Sent a photo"),
           icon: (chat?.isGroup ? chat : sender)?.profilePic,
           tag: chatId,
           onClick: () => chat && selectChat(chat),
@@ -394,7 +397,7 @@ export const ChatProvider = ({ children }) => {
         setMessages((prevMessages) =>
           prevMessages.some((message) => message._id === newMessage._id)
             ? prevMessages
-            : [...prevMessages, newMessage.groupId ? newMessage : { ...newMessage, seen: true }]
+            : [...prevMessages, newMessage.groupId || isMine ? newMessage : { ...newMessage, seen: true }]
         );
         if (countsAsUnread) {
           const markRead = newMessage.groupId ? `/api/groups/${chatId}/read` : `/api/messages/mark/${newMessage._id}`;

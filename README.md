@@ -25,6 +25,7 @@ This is the frontend. The API and realtime server live in [chatApp_backend](http
 - Last seen, message sound and browser notifications
 - Photos, videos and documents: several at once, with drag and drop, paste, upload progress and a gallery viewer
 - Voice notes recorded in the browser, with a waveform player and playback speed
+- One-to-one voice and video calls (WebRTC): mute, camera on and off, screen sharing, a minimised call that floats over the chat, and the call history inside the conversation
 - Live online status, unread counts in the sidebar and in the browser tab
 - Conversations sorted by latest message, with a preview of the last one
 - Profile page with photo preview before saving, view, change and remove

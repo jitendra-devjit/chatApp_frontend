@@ -129,6 +129,41 @@ export function describeAttachments(message){
     };
 }
 
+// "45 sec", "5 min", "1 hr 12 min": how long a finished call lasted
+export function formatCallDuration(seconds = 0){
+    if (seconds < 60) return `${Math.max(0, Math.round(seconds))} sec`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
+}
+
+// "0:07", "12:40", "1:02:05": the running clock of a call
+export function formatCallClock(seconds = 0){
+    const pad = (value) => String(value).padStart(2, "0");
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const rest = Math.floor(seconds % 60);
+    return hours > 0 ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`;
+}
+
+// The words for a call in the chat. `isOwn` is true for the person who made the call.
+// title and detail are the two lines of the bubble, preview is the single line of the chat list.
+// isMissed marks a call I did not pick up
+export function describeCall(call, isOwn){
+    const isVideo = call.kind === "video";
+    const name = isVideo ? "Video call" : "Voice call";
+    if (call.status === "completed") {
+        const duration = formatCallDuration(call.duration);
+        return { title: name, detail: duration, preview: `${name} · ${duration}`, isMissed: false };
+    }
+    if (call.status === "declined") {
+        return { title: name, detail: isOwn ? "Declined" : "You declined", preview: `${name} · Declined`, isMissed: false };
+    }
+    if (isOwn) return { title: name, detail: "No answer", preview: `${name} · No answer`, isMissed: false };
+    const missed = `Missed ${isVideo ? "video" : "voice"} call`;
+    return { title: missed, detail: "Tap to call back", preview: missed, isMissed: true };
+}
+
 // returns an error text when the file cannot be sent, otherwise null
 export function validateImageFile(file){
     if (!file || !IMAGE_TYPES.includes(file.type)) return "Choose a PNG, JPG, WEBP or GIF image";

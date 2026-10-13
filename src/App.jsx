@@ -8,6 +8,7 @@ import {Toaster} from "react-hot-toast"
 import { AuthContext } from './context/AuthContext.jsx'
 import { useContext } from 'react'
 import Aurora from './components/Aurora.jsx'
+import CallOverlay from './components/CallOverlay.jsx'
 import { LogoMark } from './components/Logo.jsx'
 
 const toastOptions = {
@@ -58,6 +59,8 @@ const App = () => {
         <Route path='/profile' element={authUser ? <Page><ProfilePage /></Page> : <Navigate to="/login"/>} />
         <Route path='*' element={<Navigate to="/"/>} />
       </Routes>
+      {/* a call stays on screen whichever page is open */}
+      <CallOverlay />
     </>
   )
 }

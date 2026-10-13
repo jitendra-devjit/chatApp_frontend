@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Archive, ArrowLeft, BellSlash, BellSimple, CaretDown, Check, Checks, Image as ImageIcon, MagnifyingGlass, Microphone,
-  Paperclip, Prohibit, PushPin, PushPinSlash, SignOut, UsersThree, VideoCamera, X,
+  Paperclip, Phone, PhoneX, Prohibit, PushPin, PushPinSlash, SignOut, UsersThree, VideoCamera, X,
 } from '@phosphor-icons/react';
 import { AuthContext } from '../context/AuthContext';
 import { ChatContext } from '../context/ChatContext';
-import { describeAttachment, formatListTime } from '../lib/utils';
+import { describeAttachment, describeCall, formatListTime } from '../lib/utils';
 import AppearanceMenu from './AppearanceMenu';
 import Avatar from './Avatar';
 import { CreateGroupModal } from './GroupModals';
@@ -129,6 +129,11 @@ const Sidebar = () => {
     const mine = last.senderId === authUser._id;
     if (last.deleted) {
       return <span className='italic'><Prohibit size={14} className='inline -mt-0.5 mr-1' />{mine ? 'You deleted this message' : 'This message was deleted'}</span>;
+    }
+    if (last.call) {
+      const { preview, isMissed } = describeCall(last.call, mine);
+      const CallIcon = isMissed ? PhoneX : last.call.kind === 'video' ? VideoCamera : Phone;
+      return <span className={isMissed ? 'text-danger' : ''}><CallIcon size={15} weight='fill' className='inline -mt-0.5 mr-1' />{preview}</span>;
     }
     // the files of the message: new style attachments, or a picture sent the old way
     const files = last.attachment ? describeAttachment(last.attachment) : last.hasImage ? { type: 'image', label: 'Photo' } : null;

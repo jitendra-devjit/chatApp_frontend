@@ -1,10 +1,12 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDown, ArrowLeft, CircleNotch, CloudArrowUp, Info, Lightning, MagnifyingGlass, Trash } from '@phosphor-icons/react'
+import { ArrowDown, ArrowLeft, CircleNotch, CloudArrowUp, Info, Lightning, MagnifyingGlass, Phone, Trash, VideoCamera } from '@phosphor-icons/react'
 import { formatDayLabel, formatLastSeen, isSameDay } from '../lib/utils'
 import { AuthContext } from '../context/AuthContext';
+import { CallContext } from '../context/CallContext';
 import { ChatContext } from '../context/ChatContext';
 import Avatar from './Avatar';
+import CallBubble from './CallBubble';
 import ChatSearch from './ChatSearch';
 import IconButton from './IconButton';
 import { LogoMark } from './Logo';
@@ -23,7 +25,7 @@ const HIGHLIGHT_MS = 1600;
 const bubbleSpring = { type: 'spring', stiffness: 520, damping: 34, mass: 0.8 };
 
 const isGroupedWith = (a, b) =>
-  a && b && !a.system && !b.system && a.senderId === b.senderId && isSameDay(a.createdAt, b.createdAt) &&
+  a && b && !a.system && !b.system && !a.call && !b.call && a.senderId === b.senderId && isSameDay(a.createdAt, b.createdAt) &&
   Math.abs(new Date(b.createdAt) - new Date(a.createdAt)) < GROUP_GAP_MS;
 
 const MessageSkeleton = () => (
@@ -64,6 +66,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     sendMessage, editMessage, deleteMessage, reactToMessage, sendTyping, typing, jumpTarget,
   } = useContext(ChatContext);
   const { authUser, onlineUsers } = useContext(AuthContext);
+  const { call, startCall } = useContext(CallContext);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [replyingTo, setReplyingTo] = useState(null); // message being answered
@@ -306,6 +309,16 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
             </p>
           </div>
         </button>
+        {!isGroup && (
+          <>
+            <IconButton label={`Voice call ${firstName}`} data-call-start='audio' disabled={Boolean(call)} onClick={() => startCall(selectedChat, 'audio')}>
+              <Phone size={21} weight='duotone' />
+            </IconButton>
+            <IconButton label={`Video call ${firstName}`} data-call-start='video' disabled={Boolean(call)} onClick={() => startCall(selectedChat, 'video')}>
+              <VideoCamera size={22} weight='duotone' />
+            </IconButton>
+          </>
+        )}
         <IconButton label='Search in this chat' active={isSearching} onClick={() => setIsSearching(!isSearching)}>
           <MagnifyingGlass size={21} weight={isSearching ? 'bold' : 'regular'} />
         </IconButton>
@@ -360,6 +373,8 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                       <p data-system className='self-center max-w-[85%] my-2 px-3 py-1 rounded-full bg-raised text-center text-xs font-medium text-muted'>
                         {msg.text}
                       </p>
+                    ) : msg.call ? (
+                      <CallBubble msg={msg} isOwn={isOwn} disabled={Boolean(call)} onCallBack={() => startCall(selectedChat, msg.call.kind)} />
                     ) : (
                       <MessageBubble
                         msg={msg}

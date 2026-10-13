@@ -1,4 +1,4 @@
-// Sound and browser notifications for incoming messages
+// Sounds and browser notifications for incoming messages and calls
 
 const STORAGE_KEY = "notifications";
 
@@ -52,6 +52,41 @@ export function playMessageSound(){
     } catch {
         // browsers block sound until the page was clicked once
     }
+}
+
+// what is played while a call rings: [frequency, start in seconds, length in seconds] and how often it repeats
+const RINGTONES = {
+    incoming: { notes: [[784, 0, 0.16], [988, 0.18, 0.16], [1175, 0.36, 0.16], [988, 0.54, 0.3]], everyMs: 1900, volume: 0.14 },
+    outgoing: { notes: [[440, 0, 0.9]], everyMs: 2800, volume: 0.06 },
+};
+
+// Rings until the returned function is called. kind is "incoming" or "outgoing"
+export function startRingtone(kind){
+    const { notes, everyMs, volume } = RINGTONES[kind];
+    const ring = () => {
+        try {
+            audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === "suspended") audioContext.resume();
+            const now = audioContext.currentTime;
+            notes.forEach(([frequency, delay, length]) => {
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                oscillator.type = "sine";
+                oscillator.frequency.value = frequency;
+                gain.gain.setValueAtTime(0.0001, now + delay);
+                gain.gain.exponentialRampToValueAtTime(volume, now + delay + 0.03);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + length);
+                oscillator.connect(gain).connect(audioContext.destination);
+                oscillator.start(now + delay);
+                oscillator.stop(now + delay + length + 0.05);
+            });
+        } catch {
+            // browsers block sound until the page was clicked once
+        }
+    };
+    ring();
+    const timer = setInterval(ring, everyMs);
+    return () => clearInterval(timer);
 }
 
 // system notification, only while the tab is in the background
