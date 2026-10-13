@@ -15,6 +15,11 @@ const RECONNECT_TIMEOUT_MS = 15000;
 // the server's list holds logins that run out, it is asked again after this long
 const ICE_REUSE_MS = 30 * 60 * 1000;
 
+// The most a browser sends per second. Enough for a sharp picture on a phone, and it keeps a
+// relayed call small: about half a gigabyte an hour instead of two
+const MAX_VIDEO_BITRATE = 900_000;
+const MAX_SCREEN_BITRATE = 1_500_000;
+
 const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const CAMERA_CONSTRAINTS = { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } };
 
@@ -155,12 +160,30 @@ export const CallProvider = ({ children }) => {
 
   const currentVideoTrack = () => screenTrack.current || cameraTrack.current || null;
 
+  // tells the browser how much video it may send at most, see MAX_VIDEO_BITRATE
+  const capBitrate = async () => {
+    const sender = peerRef.current?.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === "video")?.sender;
+    if (!sender) return;
+    try {
+      const parameters = sender.getParameters();
+      // before the first offer and answer there is nothing to set yet
+      if (!parameters.encodings?.length) return;
+      const maxBitrate = screenTrack.current ? MAX_SCREEN_BITRATE : MAX_VIDEO_BITRATE;
+      if (parameters.encodings[0].maxBitrate === maxBitrate) return;
+      parameters.encodings[0].maxBitrate = maxBitrate;
+      await sender.setParameters(parameters);
+    } catch {
+      // an older browser sends at its own rate
+    }
+  };
+
   // shows my own picture and sends it. A shared screen wins over the camera
   const syncVideo = useCallback(async () => {
     const track = currentVideoTrack();
     setLocalVideo(track ? new MediaStream([track]) : null);
     const sender = peerRef.current?.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === "video")?.sender;
     if (sender && sender.track !== track) await sender.replaceTrack(track);
+    await capBitrate();
     sendMediaState();
   }, [sendMediaState]);
 
@@ -247,6 +270,7 @@ export const CallProvider = ({ children }) => {
         reconnectTimer.current = null;
         update({ phase: "connected", connectedAt: callRef.current?.connectedAt || Date.now() });
         sendMediaState();
+        capBitrate();
         keepScreenOn();
       } else if (state === "failed" && !callRef.current?.connectedAt) {
         // every path was tried and none works, waiting longer changes nothing
@@ -517,6 +541,7 @@ export const CallProvider = ({ children }) => {
       else if (reason === "missed" && current.direction === "outgoing") toast(`${name} did not answer`, { icon: "📵" });
       else if (reason === "disconnected") toast(`${name} lost their connection`, { icon: "📵" });
       else if (reason === "failed") toast.error(connectFailedText(), { duration: 7000 });
+      else if (reason === "limit") toast("The call reached the longest time a call can take. Call again to keep talking", { icon: "⏱️", duration: 7000 });
     };
 
     // without the socket the server has already ended the call
