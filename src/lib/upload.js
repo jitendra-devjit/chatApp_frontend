@@ -101,14 +101,19 @@ const OFFICE_FORMATS = ["doc", "docx", "xls", "xlsx", "ppt", "pptx"];
 const isPublicLink = (url = "") => /^https:\/\//.test(url) && !/\/\/(localhost|127\.0\.0\.1)/.test(url);
 
 // A link that shows the document in a browser tab. A browser can show PDF and text files itself.
-// Word, Excel and PowerPoint files are opened with Microsoft's online viewer, which loads the file
-// from its link. Anything else (zip) can only be downloaded
+// Word, Excel and PowerPoint files are opened with Google's online viewer, which loads the file
+// from its link (Microsoft's viewer shows an empty page on phones). Anything else (zip) can only be downloaded
 export function viewUrl(url, extension){
     if (OFFICE_FORMATS.includes(extension) && isPublicLink(url)) {
-        return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(url)}`;
+        return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(url)}`;
     }
     return extension === "zip" ? downloadUrl(url) : url;
 }
+
+// Cloudinary refuses to hand out PDF and ZIP files over their normal link (the account would have
+// to allow it). For those the server is asked for a link that works for a few minutes, see FileCard
+export const needsTemporaryLink = (url, extension) =>
+    isCloudinary(url) && url.includes("/raw/upload/") && (extension === "pdf" || extension === "zip");
 
 // A link that downloads the file instead of opening it in the browser
 export function downloadUrl(url){

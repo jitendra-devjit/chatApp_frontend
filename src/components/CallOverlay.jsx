@@ -1,9 +1,10 @@
 import React, { useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
+import toast from 'react-hot-toast'
 import {
-  ArrowsInSimple, ArrowsOutSimple, CameraRotate, Microphone, MicrophoneSlash, MonitorArrowUp, Phone, PhoneDisconnect, PhoneX,
-  VideoCamera, VideoCameraSlash,
+  ArrowsInSimple, ArrowsOutSimple, CameraRotate, Ear, Microphone, MicrophoneSlash, MonitorArrowUp, Phone, PhoneDisconnect, PhoneX,
+  SpeakerHigh, VideoCamera, VideoCameraSlash,
 } from '@phosphor-icons/react'
 import { CallContext, canShareScreen } from '../context/CallContext'
 import { formatCallClock } from '../lib/utils'
@@ -25,9 +26,48 @@ const useElapsed = (since) => {
   return since ? Math.max(0, Math.floor((now - since) / 1000)) : 0;
 };
 
-// A <video> (or <audio>) element that plays a MediaStream
-const StreamPlayer = ({ as: Tag = 'video', stream, ...props }) => {
+// ---------- loudspeaker or earpiece ----------
+// A web page cannot switch a phone between its loudspeaker and its earpiece the way an app can.
+// What some browsers offer (Chrome on Android and on a computer) is a list of sound outputs and
+// a way to send one element's sound to one of them. Where that exists the button uses it.
+
+const canRouteSound = () => typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+const isEarpiece = (device) => /earpiece|receiver|handset/i.test(device?.label || '');
+const isLoudspeaker = (device) => /speaker/i.test(device?.label || '') && !isEarpiece(device);
+
+// the sound outputs of this device, read again whenever `refreshKey` changes or something is plugged in
+const useSoundOutputs = (active, refreshKey) => {
+  const [outputs, setOutputs] = useState([]);
+  useEffect(() => {
+    const devices = navigator.mediaDevices;
+    if (!active || !devices?.enumerateDevices || !canRouteSound()) return setOutputs([]);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const all = await devices.enumerateDevices();
+        // "communications" is Windows' second name for one of the others
+        if (!cancelled) setOutputs(all.filter((device) => device.kind === 'audiooutput' && device.deviceId && device.deviceId !== 'communications'));
+      } catch {
+        // without the list the button explains that the browser decides
+      }
+    };
+    load();
+    devices.addEventListener?.('devicechange', load);
+    return () => {
+      cancelled = true;
+      devices.removeEventListener?.('devicechange', load);
+    };
+  }, [active, refreshKey]);
+  return outputs;
+};
+
+// A <video> (or <audio>) element that plays a MediaStream. `sinkId` picks the sound output
+const StreamPlayer = ({ as: Tag = 'video', stream, sinkId, ...props }) => {
   const ref = useRef(null);
+  useEffect(() => {
+    if (sinkId === undefined || !ref.current?.setSinkId) return;
+    ref.current.setSinkId(sinkId).catch(() => {});
+  }, [sinkId, stream]);
   useEffect(() => {
     const element = ref.current;
     if (!element || element.srcObject === stream) return;
@@ -89,6 +129,31 @@ const CallOverlay = () => {
   } = useContext(CallContext);
   const elapsed = useElapsed(call?.connectedAt);
 
+  // ---- where the other person's voice plays ----
+  const outputs = useSoundOutputs(Boolean(call) && call.phase !== 'incoming', call?.phase);
+  const [outputId, setOutputId] = useState(undefined); // undefined: wherever the browser plays it
+  const callKey = call?.key;
+  useEffect(() => setOutputId(undefined), [callKey]);
+
+  const currentOutput = outputs.find((device) => device.deviceId === outputId) || outputs[0];
+  const onEarpiece = isEarpiece(currentOutput);
+  // phones get the button even where it can only explain itself, people look for it there
+  const showSoundButton = outputs.length > 1 || isTouchDevice();
+
+  const switchOutput = () => {
+    if (outputs.length < 2) {
+      return toast('This browser decides by itself where the call plays. Use the volume keys, or earphones for a private call', { icon: '🔈', duration: 6000 });
+    }
+    const loud = outputs.find(isLoudspeaker);
+    const quiet = outputs.find(isEarpiece);
+    // a phone: straight between loudspeaker and earpiece. Anything else: the next output in the list
+    const next = loud && quiet
+      ? (onEarpiece ? loud : quiet)
+      : outputs[(outputs.indexOf(currentOutput) + 1) % outputs.length];
+    setOutputId(next.deviceId);
+    toast(isEarpiece(next) ? 'Earpiece' : next.label || 'Speaker', { icon: isEarpiece(next) ? '👂' : '🔊', duration: 2000 });
+  };
+
   // "back" on a phone shrinks the call to the pill, it never hangs up
   useBackButton(Boolean(call) && !isMinimized && call.phase !== 'incoming', () => setIsMinimized(true));
 
@@ -101,7 +166,7 @@ const CallOverlay = () => {
   return createPortal(
     <>
       {/* the other person's voice, playing whatever the screen looks like */}
-      {call && <StreamPlayer as='audio' stream={remoteStream} data-call-audio />}
+      {call && <StreamPlayer as='audio' stream={remoteStream} sinkId={outputId} data-call-audio />}
 
       <AnimatePresence>
         {call && !isMinimized && (
@@ -225,6 +290,12 @@ const CallOverlay = () => {
                   <ControlButton label={call.camOn ? 'Turn camera off' : 'Turn camera on'} off={!call.camOn} aria-pressed={!call.camOn} data-call-camera={call.camOn ? 'on' : 'off'} onClick={toggleCamera}>
                     {call.camOn ? <VideoCamera size={24} weight='fill' /> : <VideoCameraSlash size={24} weight='fill' />}
                   </ControlButton>
+                  {showSoundButton && (
+                    <ControlButton label={onEarpiece ? 'Switch to speaker' : outputs.length > 1 ? 'Switch sound output' : 'Speaker'} off={onEarpiece}
+                      data-call-speaker={onEarpiece ? 'earpiece' : 'speaker'} data-call-output={currentOutput?.label || ''} onClick={switchOutput}>
+                      {onEarpiece ? <Ear size={24} weight='fill' /> : <SpeakerHigh size={24} weight='fill' />}
+                    </ControlButton>
+                  )}
                   {canShareScreen() && (
                     <ControlButton label={call.sharing ? 'Stop sharing' : 'Share screen'} on={call.sharing} aria-pressed={call.sharing} disabled={!isLive}
                       data-call-share={call.sharing ? 'on' : 'off'} onClick={toggleScreenShare} className='max-sm:hidden disabled:opacity-40'>

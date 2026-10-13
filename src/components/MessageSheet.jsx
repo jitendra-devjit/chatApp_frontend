@@ -1,7 +1,7 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'motion/react'
-import { ArrowBendUpLeft, Copy, PencilSimple, Trash } from '@phosphor-icons/react'
+import { ArrowBendUpLeft, ArrowBendUpRight, Copy, PencilSimple, ShareNetwork, Trash } from '@phosphor-icons/react'
 import { describeAttachments, EDIT_WINDOW_MS, QUICK_REACTIONS } from '../lib/utils'
 import { useBackButton } from '../lib/backButton'
 
@@ -11,7 +11,8 @@ const itemClass = 'flex items-center gap-3.5 w-full h-[52px] px-4 rounded-2xl te
 // What can be done with a message, on a phone: a sheet that slides up from the bottom after a tap
 // or a long press on the message. It closes on a tap outside, a swipe down or the back button.
 // Render inside <AnimatePresence>
-const MessageSheet = ({ msg, myId, isOwn, authorName, onClose, onReply, onEdit, onDelete, onReact, onCopy }) => {
+// `onShare` is only given when this message can go to the phone's own share menu
+const MessageSheet = ({ msg, myId, isOwn, authorName, onClose, onReply, onEdit, onDelete, onReact, onCopy, onForward, onShare }) => {
   useBackButton(true, onClose)
 
   const canEdit = isOwn && Boolean(msg.text) && Date.now() - new Date(msg.createdAt).getTime() < EDIT_WINDOW_MS
@@ -56,6 +57,16 @@ const MessageSheet = ({ msg, myId, isOwn, authorName, onClose, onReply, onEdit, 
           <button type='button' data-sheet-action='reply' onClick={run(() => onReply(msg))} className={itemClass}>
             <ArrowBendUpLeft size={21} weight='bold' className='text-accent-text' /> Reply
           </button>
+          {(msg.text || msg.attachments?.length > 0) && (
+            <button type='button' data-sheet-action='forward' onClick={run(() => onForward(msg))} className={itemClass}>
+              <ArrowBendUpRight size={21} weight='bold' className='text-accent-text' /> Forward
+            </button>
+          )}
+          {onShare && (
+            <button type='button' data-sheet-action='share' onClick={run(() => onShare(msg))} className={itemClass}>
+              <ShareNetwork size={21} weight='duotone' className='text-accent-text' /> Share to another app
+            </button>
+          )}
           {msg.text && (
             <button type='button' data-sheet-action='copy' onClick={run(() => onCopy(msg))} className={itemClass}>
               <Copy size={21} weight='duotone' className='text-accent-text' /> Copy text

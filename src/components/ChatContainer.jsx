@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import toast from 'react-hot-toast'
 import { ArrowDown, ArrowLeft, CircleNotch, CloudArrowUp, Info, Lightning, MagnifyingGlass, Phone, Trash, VideoCamera } from '@phosphor-icons/react'
 import { formatDayLabel, formatLastSeen, isSameDay } from '../lib/utils'
+import { extensionOf, needsTemporaryLink } from '../lib/upload'
 import { isTouchDevice } from '../lib/backButton'
 import { AuthContext } from '../context/AuthContext';
 import { CallContext } from '../context/CallContext';
@@ -15,6 +16,7 @@ import { LogoMark } from './Logo';
 import MessageBubble from './MessageBubble';
 import MessageComposer from './MessageComposer';
 import MessageSheet from './MessageSheet';
+import ForwardModal from './ForwardModal';
 import { ConfirmDialog } from './Modal';
 import TypingDots from './TypingDots';
 
@@ -66,7 +68,7 @@ const EmptyState = () => (
 const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const {
     messages, hasMore, isLoadingMessages, isLoadingOlder, loadOlderMessages, selectedChat, selectChat, users,
-    sendMessage, editMessage, deleteMessage, reactToMessage, sendTyping, typing, jumpTarget,
+    sendMessage, retryMessage, discardMessage, editMessage, deleteMessage, reactToMessage, sendTyping, typing, jumpTarget,
   } = useContext(ChatContext);
   const { authUser, onlineUsers } = useContext(AuthContext);
   const { call, startCall } = useContext(CallContext);
@@ -80,6 +82,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [sheetId, setSheetId] = useState(null); // message whose options sheet is open (touch screens)
+  const [forwardTarget, setForwardTarget] = useState(null); // message being sent on to other chats
   const isTouch = useMemo(isTouchDevice, []);
   const scrollRef = useRef(null);
   const composerRef = useRef(null);
@@ -100,6 +103,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
     setDeleteTarget(null);
     setOpenMenu(null);
     setSheetId(null);
+    setForwardTarget(null);
     setIsSearching(false);
   }, [selectedId]);
 
@@ -270,7 +274,7 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
       if (saved) setEditingMessage(null);
       return saved;
     }
-    const sent = await sendMessage(replyingTo ? { ...payload, replyTo: replyingTo._id } : payload);
+    const sent = await sendMessage(replyingTo ? { ...payload, replyTo: replyingTo._id, replyToMessage: replyingTo } : payload);
     if (sent) setReplyingTo(null);
     return sent;
   };
@@ -281,6 +285,26 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
       toast.success('Copied');
     } catch {
       toast.error('Could not copy');
+    }
+  };
+
+  // What of a message can be handed to the phone's own share menu (WhatsApp, mail, ...): its text
+  // and the link of its first file. null when the browser has no share menu or there is nothing to hand over
+  const shareDataOf = (message) => {
+    if (!navigator.share) return null;
+    const [file] = message.attachments || [];
+    // a link that only opens through the server is of no use to another app
+    const canLink = file && /^https:/.test(file.url) && !needsTemporaryLink(file.url, extensionOf(file.name || file.url));
+    if (!message.text && !canLink) return null;
+    return { ...(message.text ? { text: message.text } : {}), ...(canLink ? { url: file.url } : {}) };
+  };
+
+  const shareMessage = async (message) => {
+    try {
+      await navigator.share(shareDataOf(message));
+    } catch (error) {
+      // closing the share menu is not an error
+      if (error.name !== 'AbortError') toast.error('Could not share this message');
     }
   };
 
@@ -380,7 +404,8 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                 const isNewDay = !prev || !isSameDay(prev.createdAt, msg.createdAt);
 
                 return (
-                  <React.Fragment key={msg._id}>
+                  // clientId: a message keeps its place when its temporary id becomes the server's
+                  <React.Fragment key={msg.clientId || msg._id}>
                     {isNewDay && (
                       <div className='flex justify-center py-4' role='separator'>
                         <span className='px-3 h-7 grid place-items-center rounded-full bg-raised border border-line text-[11px] font-semibold text-muted'>
@@ -419,6 +444,9 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
                         onOpenImage={(items, index) => onOpenImage({ items, index, title: isOwn ? 'You' : findUser(msg.senderId)?.fullName })}
                         onJumpTo={jumpToMessage}
                         onImageLoad={handleImageLoad}
+                        onForward={setForwardTarget}
+                        onRetry={(message) => retryMessage(message._id)}
+                        onDiscard={(message) => discardMessage(message._id)}
                       />
                     )}
                   </React.Fragment>
@@ -472,8 +500,13 @@ const ChatContainer = ({ onToggleDetails, isDetailsOpen, onOpenImage }) => {
           <MessageSheet key='sheet' msg={sheetMessage} myId={authUser._id} isOwn={sheetMessage.senderId === authUser._id}
             authorName={sheetMessage.senderId === authUser._id ? 'You' : findUser(sheetMessage.senderId)?.fullName || 'Someone'}
             onClose={() => setSheetId(null)} onReply={startReply} onEdit={startEdit} onDelete={setDeleteTarget}
-            onReact={(message, emoji) => reactToMessage(message._id, emoji)} onCopy={copyMessage} />
+            onReact={(message, emoji) => reactToMessage(message._id, emoji)} onCopy={copyMessage}
+            onForward={setForwardTarget} onShare={shareDataOf(sheetMessage) ? shareMessage : undefined} />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {forwardTarget && <ForwardModal key='forward' msg={forwardTarget} onClose={() => setForwardTarget(null)} />}
       </AnimatePresence>
     </section>
   );

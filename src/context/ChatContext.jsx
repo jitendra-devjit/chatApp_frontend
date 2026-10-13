@@ -13,6 +13,9 @@ const TYPING_TIMEOUT_MS = 5000;
 const MAX_CACHED_CHATS = 30;
 const CACHED_MESSAGES = 50;
 
+// ids of messages that are on screen but not on the server yet
+let nextTempId = 1;
+
 const toPreview = (message) => ({
   _id: message._id,
   text: message.text || "",
@@ -171,7 +174,11 @@ export const ChatProvider = ({ children }) => {
       .get(messagesUrl(chat))
       .then(({ data }) => {
         if (cancelled) return;
-        setMessages(data.messages);
+        // messages still on their way (or that failed) are not on the server's page, they stay at the end
+        setMessages((prev) => {
+          const unsent = prev.filter((message) => message.pending || message.failed);
+          return unsent.length > 0 ? [...data.messages, ...unsent] : data.messages;
+        });
         setHasMore(Boolean(data.hasMore));
       })
       .catch((error) => {
@@ -207,20 +214,102 @@ export const ChatProvider = ({ children }) => {
     }
   };
 
-  //function to send a message to the open chat. Resolves to true on success
-  const sendMessage = async (messageData) => {
-    const chat = selectedChat;
-    if (!chat) return false;
+  // Changes the messages of a chat: on screen when it is the open one, in the remembered copy otherwise
+  // (the user may have opened another chat while a request was running)
+  const patchThread = (chatId, change) => {
+    if (selectedIdRef.current === chatId) return setMessages(change);
+    const cached = messageCache.current.get(chatId);
+    if (cached) messageCache.current.set(chatId, { ...cached, messages: change(cached.messages) });
+  };
+
+  // Hands a message to the server. `tempId` is the message that already stands in for it on screen.
+  // Resolves to true on success
+  const deliver = async (chat, body, tempId) => {
     try {
-      const { data } = await axios.post(sendUrl(chat), messageData);
-      const { newMessage } = data;
+      const { data } = await axios.post(sendUrl(chat), body);
+      // clientId keeps the bubble the same element when its temporary id becomes the real one
+      const newMessage = tempId ? { ...data.newMessage, clientId: tempId } : data.newMessage;
       setLastMessages((prev) => ({ ...prev, [chat._id]: toPreview(newMessage) }));
-      // the user may have opened another chat while the request was running
-      if (selectedIdRef.current === chat._id) {
-        setMessages((prevMessages) =>
-          prevMessages.some((message) => message._id === newMessage._id) ? prevMessages : [...prevMessages, newMessage]
-        );
+      patchThread(chat._id, (list) => {
+        if (list.some((message) => message._id === newMessage._id)) return list.filter((message) => message._id !== tempId);
+        if (list.some((message) => message._id === tempId)) return list.map((message) => (message._id === tempId ? newMessage : message));
+        return [...list, newMessage];
+      });
+      return true;
+    } catch (error) {
+      if (!tempId) {
+        showError(error);
+        return false;
       }
+      // it stays in the chat, marked, with a way to try again
+      patchThread(chat._id, (list) =>
+        list.map((message) => (message._id === tempId ? { ...message, pending: false, failed: true } : message))
+      );
+      if (selectedIdRef.current !== chat._id && error.response?.status !== 401) {
+        toast.error(`Your message to ${chat.fullName} was not sent`);
+      }
+      return false;
+    }
+  };
+
+  // Sends a message to the open chat. Resolves to true when the composer can be emptied.
+  // Text shows in the chat at once and is delivered in the background: waiting for the server
+  // before showing anything is what made sending feel slow. A message with files is shown once
+  // it is stored, its upload takes far longer than the request anyway.
+  // `replyToMessage` is the quoted message itself, for showing the quote right away
+  const sendMessage = (messageData) => {
+    const chat = selectedChat;
+    if (!chat) return Promise.resolve(false);
+    const { replyToMessage, ...body } = messageData;
+    if (body.attachments?.length || body.image) return deliver(chat, body, null);
+
+    const tempId = `temp-${Date.now()}-${nextTempId++}`;
+    const quoted = replyToMessage && {
+      _id: replyToMessage._id, text: replyToMessage.text, image: replyToMessage.image, attachments: replyToMessage.attachments,
+      senderId: replyToMessage.senderId, deletedAt: replyToMessage.deletedAt,
+    };
+    const temp = {
+      _id: tempId, clientId: tempId, senderId: authUserId, [chat.isGroup ? "groupId" : "receiverId"]: chat._id,
+      text: body.text, replyTo: quoted || undefined, attachments: [], reactions: [],
+      createdAt: new Date().toISOString(), pending: true, draft: body,
+    };
+    setMessages((prev) => [...prev, temp]);
+    setLastMessages((prev) => ({ ...prev, [chat._id]: toPreview(temp) }));
+    deliver(chat, body, tempId);
+    return Promise.resolve(true);
+  };
+
+  // try a message that was not sent once more
+  const retryMessage = (tempId) => {
+    const message = messages.find((item) => item._id === tempId);
+    const chat = message && chatsRef.current.find((item) => item._id === (message.groupId || message.receiverId));
+    if (!message?.failed || !chat) return;
+    setMessages((prev) => prev.map((item) => (item._id === tempId ? { ...item, failed: false, pending: true } : item)));
+    deliver(chat, message.draft, tempId);
+  };
+
+  // give up on a message that was not sent
+  const discardMessage = (tempId) => {
+    const rest = messages.filter((item) => item._id !== tempId);
+    setMessages(rest);
+    const chatId = selectedIdRef.current;
+    const last = rest[rest.length - 1];
+    setLastMessages((prev) => (prev[chatId]?._id !== tempId ? prev : last ? { ...prev, [chatId]: toPreview(last) } : withoutKey(prev, chatId)));
+  };
+
+  // Sends a message on to other chats (`targets` are chats). Resolves to true on success
+  const forwardMessage = async (messageId, targets) => {
+    try {
+      const { data } = await axios.post(`/api/messages/${messageId}/forward`, {
+        userIds: targets.filter((chat) => !chat.isGroup).map((chat) => chat._id),
+        groupIds: targets.filter((chat) => chat.isGroup).map((chat) => chat._id),
+      });
+      for (const message of data.messages) {
+        const chatId = message.groupId || message.receiverId;
+        setLastMessages((prev) => ({ ...prev, [chatId]: toPreview(message) }));
+        patchThread(chatId, (list) => (list.some((item) => item._id === message._id) ? list : [...list, message]));
+      }
+      toast.success(targets.length === 1 ? `Forwarded to ${targets[0].fullName.split(" ")[0]}` : `Forwarded to ${targets.length} chats`);
       return true;
     } catch (error) {
       showError(error);
@@ -494,6 +583,9 @@ export const ChatProvider = ({ children }) => {
     selectChat,
     loadOlderMessages,
     sendMessage,
+    retryMessage,
+    discardMessage,
+    forwardMessage,
     editMessage,
     deleteMessage,
     reactToMessage,

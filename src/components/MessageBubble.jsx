@@ -1,6 +1,9 @@
 import React, { useRef } from 'react'
 import { AnimatePresence, motion, useMotionValue, useTransform } from 'motion/react'
-import { ArrowBendUpLeft, Check, Checks, Copy, DotsThree, Image as ImageIcon, Microphone, Paperclip, PencilSimple, Prohibit, Smiley, Trash, VideoCamera } from '@phosphor-icons/react'
+import {
+  ArrowBendUpLeft, ArrowBendUpRight, Check, Checks, Clock, Copy, DotsThree, Image as ImageIcon, Microphone, Paperclip, PencilSimple,
+  Prohibit, Smiley, Trash, VideoCamera, WarningCircle,
+} from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { describeAttachments, EDIT_WINDOW_MS, formatMessageTime, getNameColor, isEmojiOnly, QUICK_REACTIONS } from '../lib/utils'
 import { FileCard, MediaGrid, VoicePlayer } from './Attachments'
@@ -35,16 +38,20 @@ const groupReactions = (reactions = [], myId) => {
 // 'react' or 'more'.
 // With `isTouch` there is no hover: a tap or a hold on the message calls `onOpenSheet(msg)`
 // (see MessageSheet) and a swipe to the right answers it.
+// A message that is not on the server yet has `pending` (a clock instead of the tick) or `failed`
+// (with "Retry" and "Delete"), it cannot be answered or reacted to.
 // In a group, `sender` is given for other people's messages: their name and picture are shown.
 // `getName(userId)` gives the first name to show for the author of a quoted message
 const MessageBubble = ({
   msg, isOwn, isGroupStart, isGroupEnd, isNewDay, isFresh, isHighlighted, seen,
   myId, sender, getName, openMenu, setOpenMenu, isTouch, onOpenSheet,
-  onReply, onEdit, onDelete, onReact, onOpenImage, onJumpTo, onImageLoad,
+  onReply, onEdit, onDelete, onReact, onOpenImage, onJumpTo, onImageLoad, onForward, onRetry, onDiscard,
 }) => {
   const isDeleted = Boolean(msg.deletedAt);
-  // the files of the message by how they are shown. A picture sent the old way counts as a photo
-  const attachments = isDeleted ? [] : msg.attachments || [];
+  const isUnsent = Boolean(msg.pending || msg.failed);
+  // the files of the message by how they are shown. A picture sent the old way counts as a photo.
+  // Each file remembers its place in the message, a document needs it to be opened
+  const attachments = isDeleted ? [] : (msg.attachments || []).map((file, index) => ({ ...file, index }));
   const media = [
     ...(msg.image && !isDeleted ? [{ type: 'image', url: msg.image }] : []),
     ...attachments.filter((file) => file.type === 'image' || file.type === 'video'),
@@ -69,7 +76,8 @@ const MessageBubble = ({
   };
 
   // ---------- touch ----------
-  const canTouch = isTouch && !isDeleted;
+  const canTouch = isTouch && !isDeleted && !isUnsent;
+  const canForward = Boolean(msg.text) || attachments.length > 0;
   const swipeX = useMotionValue(0);
   const swipeHint = useTransform(swipeX, [8, SWIPE_REPLY_PX], [0, 1]);
   const wasSwiped = useRef(false);
@@ -157,11 +165,16 @@ const MessageBubble = ({
         <div onClick={handleBubbleTap} onTouchStart={startHold} onTouchMove={cancelHold} onTouchEnd={cancelHold} onTouchCancel={cancelHold}
           onContextMenu={(e) => { if (canTouch) e.preventDefault() }}
           className={`flex flex-col gap-[3px] min-w-0 max-w-[82%] sm:max-w-[66%] rounded-[24px] transition-shadow duration-500 ${isOwn ? 'items-end' : 'items-start'} ${isHighlighted ? 'shadow-[0_0_0_3px_var(--accent-text)]' : ''} ${canTouch ? 'select-none [-webkit-touch-callout:none]' : ''}`}>
+          {msg.forwarded && !isDeleted && (
+            <span data-forwarded className='flex items-center gap-1 px-1.5 text-[11px] font-medium italic text-faint'>
+              <ArrowBendUpRight size={12} weight='bold' /> Forwarded
+            </span>
+          )}
           {media.length > 0 && (
             <MediaGrid items={media} corners={corners} onLoad={onImageLoad} onOpen={(index) => onOpenImage(media, index)} />
           )}
           {sounds.map((file) => <VoicePlayer key={file.url} attachment={file} isOwn={isOwn} corners={corners} />)}
-          {documents.map((file) => <FileCard key={file.url} attachment={file} isOwn={isOwn} corners={corners} />)}
+          {documents.map((file) => <FileCard key={file.url} attachment={file} messageId={msg._id} index={file.index} isOwn={isOwn} corners={corners} />)}
 
           {isDeleted ? (
             <p data-deleted className={`flex items-center gap-2 px-4 py-2.5 rounded-[22px] ${corners} border border-dashed border-line-strong text-sm italic text-muted`}>
@@ -193,7 +206,7 @@ const MessageBubble = ({
         </div>
 
         {/* ---- actions: shown on hover. Touch screens get the sheet instead ---- */}
-        {!isDeleted && !isTouch && (
+        {!isDeleted && !isTouch && !isUnsent && (
           <div data-menu-root className={`relative flex items-center shrink-0 transition-opacity duration-150 ${isOwn ? 'flex-row-reverse' : ''}
             ${menu ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'}`}>
             <button type='button' aria-label='React' title='React' onClick={toggleMenu('react')} className={actionClass}>
@@ -231,6 +244,11 @@ const MessageBubble = ({
                       <Copy size={17} weight='duotone' /> Copy text
                     </button>
                   )}
+                  {canForward && (
+                    <button type='button' role='menuitem' onClick={run(() => onForward(msg))} className={menuItemClass}>
+                      <ArrowBendUpRight size={17} weight='duotone' /> Forward
+                    </button>
+                  )}
                   {canEdit && (
                     <button type='button' role='menuitem' onClick={run(() => onEdit(msg))} className={menuItemClass}>
                       <PencilSimple size={17} weight='duotone' /> Edit
@@ -241,7 +259,7 @@ const MessageBubble = ({
                       <Trash size={17} weight='duotone' /> Delete for everyone
                     </button>
                   )}
-                  {!msg.text && !isOwn && <p className='px-3 py-2 text-sm text-muted'>No options</p>}
+                  {!msg.text && !isOwn && !canForward && <p className='px-3 py-2 text-sm text-muted'>No options</p>}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -263,13 +281,23 @@ const MessageBubble = ({
         </div>
       )}
 
-      {isGroupEnd && (
+      {msg.failed && (
+        <span data-failed className='mt-1 px-1.5 flex items-center gap-2 text-xs font-semibold text-danger'>
+          <span className='flex items-center gap-1'><WarningCircle size={14} weight='fill' /> Not sent</span>
+          <button type='button' onClick={() => onRetry(msg)} className='underline underline-offset-2'>Retry</button>
+          <button type='button' onClick={() => onDiscard(msg)} className='text-muted underline underline-offset-2'>Delete</button>
+        </span>
+      )}
+
+      {isGroupEnd && !msg.failed && (
         <span className={`mt-1 px-1.5 flex items-center gap-1 text-[11px] font-medium tabular-nums text-faint ${indent}`}>
           {msg.editedAt && !isDeleted && <span data-edited>edited ·</span>}
           <time>{formatMessageTime(msg.createdAt)}</time>
-          {isOwn && !isDeleted && (seen
-            ? <Checks size={15} weight='bold' className='text-accent-text' data-seen aria-label='Seen' />
-            : <Check size={14} weight='bold' aria-label='Sent' />)}
+          {isOwn && !isDeleted && (msg.pending
+            ? <Clock size={13} weight='bold' data-pending aria-label='Sending' />
+            : seen
+              ? <Checks size={15} weight='bold' className='text-accent-text' data-seen aria-label='Seen' />
+              : <Check size={14} weight='bold' aria-label='Sent' />)}
         </span>
       )}
     </motion.div>

@@ -26,6 +26,9 @@ This is the frontend. The API and realtime server live in [chatApp_backend](http
 - Photos, videos and documents: several at once, with drag and drop, paste, upload progress and a gallery viewer
 - Voice notes recorded in the browser, with a waveform player and playback speed
 - One-to-one voice and video calls (WebRTC): mute, camera on and off, front and back camera, screen sharing, a minimised call that floats over the chat, and the call history inside the conversation
+- A text message is on screen the moment it is sent and is delivered in the background (a clock until the server has it, "Retry" when it could not be sent)
+- Forward a message to up to five chats, or hand it to the phone's own share menu
+- Documents open on any device: PDF and ZIP through a short-lived link from the server, Word, Excel and PowerPoint in Google's viewer
 - Built for phones too: the back button closes the chat, drawer, dialog or picture instead of leaving the app, a tap or a hold on a message opens a bottom sheet, a swipe to the right answers it, chats open at once from memory, and the heavy blur and moving background are switched off on small screens
 - Live online status, unread counts in the sidebar and in the browser tab
 - Conversations sorted by latest message, with a preview of the last one

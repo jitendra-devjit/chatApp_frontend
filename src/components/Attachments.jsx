@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
+import toast from 'react-hot-toast'
+import { AuthContext } from '../context/AuthContext'
+import { getErrorMessage } from '../lib/utils'
 import {
   DownloadSimple, File as FileIcon, FileCsv, FileDoc, FilePdf, FilePpt, FileText, FileXls, FileZip, Microphone,
   MusicNotes, Pause, Play,
 } from '@phosphor-icons/react'
-import { downloadUrl, extensionOf, formatBytes, formatDuration, posterUrl, thumbnailUrl, viewUrl } from '../lib/upload'
+import { downloadUrl, extensionOf, formatBytes, formatDuration, needsTemporaryLink, posterUrl, thumbnailUrl, viewUrl } from '../lib/upload'
 
 // ---------- photos and videos ----------
 
@@ -187,18 +190,46 @@ const FILE_ICONS = {
   txt: [FileText, '#9aa0b4'],
 }
 
-export const FileCard = ({ attachment, isOwn = false, corners = '', compact = false }) => {
+// `messageId` and `index` say which file of which message this is, needed for files that
+// only open with a link from the server
+export const FileCard = ({ attachment, messageId, index, isOwn = false, corners = '', compact = false }) => {
+  const { axios } = useContext(AuthContext)
   const extension = extensionOf(attachment.name || attachment.url)
   const [Icon, color] = FILE_ICONS[extension] || [FileIcon, '#9aa0b4']
   const details = [extension.toUpperCase(), formatBytes(attachment.size)].filter(Boolean).join(' · ')
   const name = attachment.name || 'Document'
+  const viaServer = Boolean(messageId) && needsTemporaryLink(attachment.url, extension)
+
+  // Opens or downloads a file that needs a link from the server first
+  const withTemporaryLink = (download) => async (e) => {
+    e.stopPropagation()
+    if (!viaServer) return
+    e.preventDefault()
+    // The new tab is opened right now, while this still counts as the user's click:
+    // after waiting for the server a browser would block it as a pop-up
+    const tab = download ? null : window.open('', '_blank')
+    try {
+      const { data } = await axios.get(`/api/messages/${messageId}/files/${index}/link`, { params: download ? { download: 1 } : undefined })
+      if (tab) {
+        tab.opener = null
+        tab.location.replace(data.url)
+      } else {
+        // a download link does not leave the page
+        window.location.assign(data.url)
+      }
+    } catch (error) {
+      tab?.close()
+      toast.error(getErrorMessage(error))
+    }
+  }
+  const opensAsDownload = extension === 'zip'
 
   return (
     <div data-file className={`group/file flex items-center gap-1 max-w-full ${compact ? 'w-full p-2 rounded-2xl' : `w-72 p-2.5 rounded-[22px] ${corners}`}
         ${isOwn ? 'grad text-white shadow-lg shadow-[color-mix(in_oklab,var(--a2)_35%,transparent)]' : 'bg-bubble text-ink border border-line hover:border-line-strong'}`}>
       {/* a click on the card opens the document in a new tab */}
       <a data-file-open href={viewUrl(attachment.url, extension)} target='_blank' rel='noopener noreferrer' title={`Open ${name}`}
-        onClick={(e) => e.stopPropagation()} className='flex items-center gap-3 min-w-0 flex-1'>
+        onClick={withTemporaryLink(opensAsDownload)} className='flex items-center gap-3 min-w-0 flex-1'>
         <span className={`grid place-items-center w-11 h-11 shrink-0 rounded-2xl ${isOwn ? 'bg-white/20' : 'bg-raised'}`}
           style={isOwn ? undefined : { color }}>
           <Icon size={24} weight='duotone' />
@@ -208,8 +239,8 @@ export const FileCard = ({ attachment, isOwn = false, corners = '', compact = fa
           <span className={`block mt-0.5 text-[11px] font-semibold ${isOwn ? 'text-white/75' : 'text-muted'}`}>{details}</span>
         </span>
       </a>
-      <a href={downloadUrl(attachment.url)} download={attachment.name} aria-label={`Download ${name}`} title='Download'
-        onClick={(e) => e.stopPropagation()}
+      <a data-file-download href={downloadUrl(attachment.url)} download={attachment.name} aria-label={`Download ${name}`} title='Download'
+        onClick={withTemporaryLink(true)}
         className={`grid place-items-center w-9 h-9 shrink-0 rounded-full transition-colors ${isOwn ? 'bg-white/20 hover:bg-white/35' : 'bg-raised hover:bg-hover'}`}>
         <DownloadSimple size={16} weight='bold' />
       </a>

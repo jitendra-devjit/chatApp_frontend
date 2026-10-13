@@ -53,7 +53,8 @@ const RightSidebar = ({ onClose, onOpenImage }) => {
   const { media, documents } = useMemo(() => {
     const all = messages.filter((msg) => !msg.deletedAt).flatMap((msg) => [
       ...(msg.image ? [{ type: 'image', url: msg.image }] : []),
-      ...(msg.attachments || []),
+      // which file of which message it is, a document needs that to be opened
+      ...(msg.attachments || []).map((file, index) => ({ ...file, messageId: msg._id, index })),
     ]).reverse();
     return {
       media: all.filter((file) => file.type === 'image' || file.type === 'video'),
@@ -269,7 +270,7 @@ const RightSidebar = ({ onClose, onOpenImage }) => {
             {documents.length > 0 && (
               <Section icon={<Files size={15} weight='fill' />} title='Documents' count={documents.length}>
                 <div className='flex flex-col gap-1.5 -mx-1'>
-                  {documents.map((file) => <FileCard key={file.url} attachment={file} compact />)}
+                  {documents.map((file) => <FileCard key={`${file.messageId}-${file.index}`} attachment={file} messageId={file.messageId} index={file.index} compact />)}
                 </div>
               </Section>
             )}
